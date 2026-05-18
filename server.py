@@ -1,8 +1,33 @@
 # -*- coding: utf-8 -*-
-from functools import lru_cache
+import os
+import json
 import time
+import urllib.parse
+from datetime import timedelta
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import requests
+from flask import Flask, render_template, jsonify, request, redirect, url_for, session
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    login_user,
+    login_required,
+    logout_user,
+    current_user,
+)
+from werkzeug.security import check_password_hash, generate_password_hash
+import secrets
+
+
+# =========================
+# SIMPLE API CACHE
+# =========================
+
 CACHE = {}
 CACHE_TTL = 300  # 5 წუთი
+
 
 def get_cached_data(cache_key):
     item = CACHE.get(cache_key)
@@ -17,24 +42,14 @@ def get_cached_data(cache_key):
 
     return data
 
+
 def set_cached_data(cache_key, data):
     CACHE[cache_key] = (time.time(), data)
-import os
-import json
-import urllib.parse
-from datetime import timedelta
-import requests
-from flask import Flask, render_template, jsonify, request, redirect, url_for, session
-from flask_login import (
-    LoginManager,
-    UserMixin,
-    login_user,
-    login_required,
-    logout_user,
-    current_user,
-)
-from werkzeug.security import check_password_hash, generate_password_hash
-import secrets
+
+
+# =========================
+# APP CONFIG
+# =========================
 
 APP_TITLE = "REPORT Dashboard"
 
@@ -77,6 +92,48 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
 
+
+# =========================
+# DATABASE
+# =========================
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+def get_db_connection():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable is not set")
+    return psycopg2.connect(DATABASE_URL)
+
+
+def init_db():
+    if not DATABASE_URL:
+        print("DATABASE_URL is not set. Skipping database initialization.")
+        return
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rain_days (
+            id SERIAL PRIMARY KEY,
+            rain_date TEXT NOT NULL,
+            zone TEXT NOT NULL,
+            UNIQUE (rain_date, zone)
+        )
+        """
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# =========================
+# LOGIN
+# =========================
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = "login"
@@ -118,9 +175,7 @@ def login():
         password = request.form.get("password")
         remember = request.form.get("remember") == "on"
 
-        if username in USERS and check_password_hash(
-            USERS[username]["password"], password
-        ):
+        if username in USERS and check_password_hash(USERS[username]["password"], password):
             user = User(username)
             login_user(user, remember=remember)
 
@@ -161,6 +216,10 @@ def index():
     )
 
 
+# =========================
+# HELPERS
+# =========================
+
 def _split_multi(val: str):
     if not val:
         return []
@@ -169,20 +228,9 @@ def _split_multi(val: str):
     return list(dict.fromkeys([x for x in raw if x]))
 
 
-# def normalize_date(value):
-#     if not value:
-#         return ""
-
-#     value = str(value)
-
-#     if "T" in value:
-#         return value.split("T")[0]
-
-#     if " " in value:
-#         return value.split(" ")[0]
-
-#     return value[:10]
-
+# =========================
+# WFS DATA API
+# =========================
 
 @app.route("/api/data")
 @login_required
@@ -214,7 +262,7 @@ def api_data():
         else:
             ors = " OR ".join([f"SECTOR='{s}'" for s in sectors])
             cql.append(f"({ors})")
-            # --- თარიღი ---
+
     if date_from:
         start_date_time = f"{date_from} 00:00:00"
 
@@ -255,26 +303,6 @@ def api_data():
 
         data = r.json()
         features = data.get("features", [])
-        # print("RAW FEATURES COUNT:", len(features))
-
-        # for ft in features[:10]:
-        #     props = ft.get("properties", {}) or {}
-        #     print("RAW DATE_:", props.get("DATE_"))
-
-        # if date_from:
-        #     if not date_to:
-        #         date_to = date_from
-
-        #     filtered_features = []
-
-        #     for ft in features:
-        #         props = ft.get("properties", {}) or {}
-        #         row_date = normalize_date(props.get("DATE_", ""))
-
-        #         if date_from <= row_date <= date_to:
-        #             filtered_features.append(ft)
-
-        #     features = filtered_features
 
         print("--- [WFS Response] ---")
         print(f"Features received after filters: {len(features)}")
@@ -285,8 +313,7 @@ def api_data():
             props = ft.get("properties", {}) or {}
             geom = ft.get("geometry")
             wkt_geom_text = json.dumps(
-                geom, ensure_ascii=False
-            ) if geom else ""
+                geom, ensure_ascii=False) if geom else ""
 
             tag = props.get("TAG", "")
             cad = props.get("CADCODE", "")
@@ -327,6 +354,7 @@ def api_data():
         set_cached_data(cache_key, result)
 
         return jsonify(result)
+
     except Exception as e:
         print("\n---!!! WFS ERROR !!!---")
         print("Failed URL:", url)
@@ -347,6 +375,122 @@ def api_data():
         )
 
 
+# =========================
+# RAIN DAYS API
+# =========================
+
+@app.route("/api/rain-days", methods=["GET"])
+@login_required
+def get_rain_days():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute(
+            """
+            SELECT rain_date, zone
+            FROM rain_days
+            ORDER BY rain_date ASC, zone ASC
+            """
+        )
+
+        rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        result = {}
+
+        for row in rows:
+            date = row["rain_date"]
+            zone = row["zone"]
+
+            if date not in result:
+                result[date] = []
+
+            result[date].append(zone)
+
+        return jsonify(result)
+
+    except Exception as e:
+        print("--- RAIN DAYS GET ERROR ---")
+        print(e)
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+
+@app.route("/api/rain-days", methods=["POST"])
+@login_required
+def add_rain_day():
+    try:
+        data = request.get_json() or {}
+        rain_date = str(data.get("date", "")).strip()
+        zone = str(data.get("zone", "")).strip()
+
+        if not rain_date or not zone:
+            return jsonify({"ok": False, "error": "date and zone are required"}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO rain_days (rain_date, zone)
+            VALUES (%s, %s)
+            ON CONFLICT (rain_date, zone) DO NOTHING
+            """,
+            (rain_date, zone),
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"ok": True})
+
+    except Exception as e:
+        print("--- RAIN DAYS POST ERROR ---")
+        print(e)
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+
+@app.route("/api/rain-days", methods=["DELETE"])
+@login_required
+def delete_rain_day():
+    try:
+        data = request.get_json() or {}
+        rain_date = str(data.get("date", "")).strip()
+        zone = str(data.get("zone", "")).strip()
+
+        if not rain_date or not zone:
+            return jsonify({"ok": False, "error": "date and zone are required"}), 400
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            DELETE FROM rain_days
+            WHERE rain_date = %s AND zone = %s
+            """,
+            (rain_date, zone),
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"ok": True})
+
+    except Exception as e:
+        print("--- RAIN DAYS DELETE ERROR ---")
+        print(e)
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+
+# =========================
+# USER INFO API
+# =========================
+
 @app.route("/api/user_info")
 @login_required
 def user_info():
@@ -360,6 +504,12 @@ def user_info():
         }
     )
 
+
+# =========================
+# START
+# =========================
+
+init_db()
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

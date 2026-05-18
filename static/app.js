@@ -555,20 +555,32 @@ function animateValue(id, end) {
 
   obj.innerText = end;
 }
+let rainDaysCache = {};
 
 function getRainDays() {
+  return rainDaysCache || {};
+}
+
+async function fetchRainDays() {
   try {
-    return JSON.parse(localStorage.getItem(RAIN_DAYS_STORAGE_KEY) || "{}");
+    const res = await fetch("/api/rain-days");
+    const data = await res.json();
+
+    if (data.ok === false) {
+      console.error("Rain days error:", data.error);
+      rainDaysCache = {};
+    } else {
+      rainDaysCache = data || {};
+    }
   } catch (e) {
-    return {};
+    console.error("Rain days fetch error:", e);
+    rainDaysCache = {};
   }
+
+  return rainDaysCache;
 }
 
-function saveRainDays(rainDays) {
-  localStorage.setItem(RAIN_DAYS_STORAGE_KEY, JSON.stringify(rainDays));
-}
-
-function addRainDay() {
+async function addRainDay() {
   const date = document.getElementById("rain-date").value;
   const zone = document.getElementById("rain-zone").value.trim();
 
@@ -577,42 +589,43 @@ function addRainDay() {
     return;
   }
 
-  const rainDays = getRainDays();
+  await fetch("/api/rain-days", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      date: date,
+      zone: zone,
+    }),
+  });
 
-  if (!rainDays[date]) {
-    rainDays[date] = [];
-  }
-
-  if (!rainDays[date].includes(zone)) {
-    rainDays[date].push(zone);
-  }
-
-  saveRainDays(rainDays);
-  renderRainDays();
+  await renderRainDays();
   renderReport();
 }
 
-function removeRainDay(date, zone) {
-  const rainDays = getRainDays();
+async function removeRainDay(date, zone) {
+  await fetch("/api/rain-days", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      date: date,
+      zone: zone,
+    }),
+  });
 
-  if (!rainDays[date]) return;
-
-  rainDays[date] = rainDays[date].filter((z) => z !== zone);
-
-  if (rainDays[date].length === 0) {
-    delete rainDays[date];
-  }
-
-  saveRainDays(rainDays);
-  renderRainDays();
+  await renderRainDays();
   renderReport();
 }
 
-function renderRainDays() {
+async function renderRainDays() {
   const container = document.getElementById("rain-list");
   if (!container) return;
 
-  const rainDays = getRainDays();
+  const rainDays = await fetchRainDays();
+
   container.innerHTML = "";
 
   Object.entries(rainDays).forEach(([date, zones]) => {
@@ -629,7 +642,6 @@ function renderRainDays() {
     });
   });
 }
-
 function getSelectedDaysCount() {
   const dateFromValue = document.getElementById("f-from").value;
   const dateToValue = document.getElementById("f-to").value;

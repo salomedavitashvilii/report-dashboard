@@ -3,3 +3,5 @@ flask-login
 requests
 gunicorn
 werkzeug
+psycopg2-binary
+SQLAlchemy
