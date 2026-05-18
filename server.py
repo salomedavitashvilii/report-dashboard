@@ -1,4 +1,24 @@
 # -*- coding: utf-8 -*-
+from functools import lru_cache
+import time
+CACHE = {}
+CACHE_TTL = 300  # 5 წუთი
+
+def get_cached_data(cache_key):
+    item = CACHE.get(cache_key)
+    if not item:
+        return None
+
+    created_at, data = item
+
+    if time.time() - created_at > CACHE_TTL:
+        del CACHE[cache_key]
+        return None
+
+    return data
+
+def set_cached_data(cache_key, data):
+    CACHE[cache_key] = (time.time(), data)
 import os
 import json
 import urllib.parse
@@ -167,6 +187,12 @@ def _split_multi(val: str):
 @app.route("/api/data")
 @login_required
 def api_data():
+    cache_key = request.query_string.decode("utf-8")
+
+    cached = get_cached_data(cache_key)
+    if cached is not None and request.args.get("refresh") != "1":
+        return jsonify(cached)
+
     zones = _split_multi(request.args.get("zone", ""))
     sectors = _split_multi(request.args.get("sector", ""))
     date_from = request.args.get("date_from", "").strip()
@@ -259,7 +285,8 @@ def api_data():
             props = ft.get("properties", {}) or {}
             geom = ft.get("geometry")
             wkt_geom_text = json.dumps(
-                geom, ensure_ascii=False) if geom else ""
+                geom, ensure_ascii=False
+            ) if geom else ""
 
             tag = props.get("TAG", "")
             cad = props.get("CADCODE", "")
@@ -290,15 +317,16 @@ def api_data():
                 }
             )
 
-        return jsonify(
-            {
-                "ok": True,
-                "count": len(rows),
-                "items": rows,
-                "filter": final_cql,
-            }
-        )
+        result = {
+            "ok": True,
+            "count": len(rows),
+            "items": rows,
+            "filter": final_cql,
+        }
 
+        set_cached_data(cache_key, result)
+
+        return jsonify(result)
     except Exception as e:
         print("\n---!!! WFS ERROR !!!---")
         print("Failed URL:", url)
