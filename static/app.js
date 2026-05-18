@@ -274,47 +274,94 @@ window.addEventListener("DOMContentLoaded", () => {
   const savedTab = loadActiveTab();
   if (savedTab) switchView(savedTab);
 
-  document
-    .getElementById("f-zone")
-    .addEventListener("input", saveFiltersToStorage);
-  document
-    .getElementById("f-sector")
-    .addEventListener("input", saveFiltersToStorage);
-  document
-    .getElementById("f-from")
-    .addEventListener("change", saveFiltersToStorage);
-  document
-    .getElementById("f-to")
-    .addEventListener("change", saveFiltersToStorage);
+  // document
+  //   .getElementById("f-zone")
+  //   .addEventListener("input", saveFiltersToStorage);
+  // document
+  //   .getElementById("f-sector")
+  //   .addEventListener("input", saveFiltersToStorage);
+  // document
+  //   .getElementById("f-from")
+  //   .addEventListener("change", saveFiltersToStorage);
+  // document
+  //   .getElementById("f-to")
+  //   .addEventListener("change", saveFiltersToStorage);
 
-  document.getElementById("btn-load").addEventListener("click", () => {
+  // document.getElementById("btn-load").addEventListener("click", () => {
+  //   saveFiltersToStorage();
+  //   loadData(false);
+  // });
+  // document.getElementById("btn-reset").addEventListener("click", resetFilters);
+  // document
+  //   .getElementById("btn-clear-active-filter")
+  //   .addEventListener("click", clearActiveZoneSectorFilter);
+  // if (document.getElementById("btn-add-rain")) {
+  //   document
+  //     .getElementById("btn-add-rain")
+  //     .addEventListener("click", addRainDay);
+  //   renderRainDays();
+  // }
+
+  // document
+  //   .getElementById("btn-refresh")
+  //   .addEventListener("click", () => loadData(true));
+  // document
+  //   .getElementById("btn-excel")
+  //   .addEventListener("click", exportReportToExcel);
+
+  // document.getElementById("tab-data").addEventListener("click", () => {
+  //   switchView("data");
+  //   saveActiveTab();
+  // });
+
+  // document.getElementById("tab-report").addEventListener("click", () => {
+  //   switchView("report");
+  //   saveActiveTab();
+  // });
+
+  // document.querySelectorAll("th.sortable").forEach((th) => {
+  //   th.addEventListener("click", () => handleSort(th.dataset.key));
+  // });
+
+  // document.getElementById("themeToggle").addEventListener("change", () => {
+  //   if (currentView === "report") updateCharts();
+  // });
+  function on(id, event, handler) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener(event, handler);
+    }
+  }
+
+  on("f-zone", "input", saveFiltersToStorage);
+  on("f-sector", "input", saveFiltersToStorage);
+  on("f-from", "change", saveFiltersToStorage);
+  on("f-to", "change", saveFiltersToStorage);
+
+  on("btn-load", "click", () => {
     saveFiltersToStorage();
     loadData(false);
   });
-  document.getElementById("btn-reset").addEventListener("click", resetFilters);
-  document
-    .getElementById("btn-clear-active-filter")
-    .addEventListener("click", clearActiveZoneSectorFilter);
+
+  on("btn-reset", "click", resetFilters);
+
+  on("btn-clear-active-filter", "click", clearActiveZoneSectorFilter);
+
   if (document.getElementById("btn-add-rain")) {
-    document
-      .getElementById("btn-add-rain")
-      .addEventListener("click", addRainDay);
+    on("btn-add-rain", "click", addRainDay);
     renderRainDays();
   }
 
-  document
-    .getElementById("btn-refresh")
-    .addEventListener("click", () => loadData(true));
-  document
-    .getElementById("btn-excel")
-    .addEventListener("click", exportReportToExcel);
+  on("btn-refresh", "click", () => loadData(true));
 
-  document.getElementById("tab-data").addEventListener("click", () => {
+  on("btn-excel", "click", exportReportToExcel);
+
+  on("tab-data", "click", () => {
     switchView("data");
     saveActiveTab();
   });
 
-  document.getElementById("tab-report").addEventListener("click", () => {
+  on("tab-report", "click", () => {
     switchView("report");
     saveActiveTab();
   });
@@ -323,7 +370,7 @@ window.addEventListener("DOMContentLoaded", () => {
     th.addEventListener("click", () => handleSort(th.dataset.key));
   });
 
-  document.getElementById("themeToggle").addEventListener("change", () => {
+  on("themeToggle", "change", () => {
     if (currentView === "report") updateCharts();
   });
 
@@ -476,7 +523,7 @@ function updateKPIs() {
   </span>
 `;
 
-azomvisElement.removeAttribute("data-tooltip");
+    azomvisElement.removeAttribute("data-tooltip");
   }
 
   document.getElementById("kpi-top-tag").innerText =
