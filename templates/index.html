@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=29" />
 </head>
 
 <body class="theme-light">
@@ -83,6 +83,14 @@
           <input type="date" id="f-to" />
         </div>
 
+        <div class="filter-item date-presets-item">
+          <label>მივლინება</label>
+          <div class="date-presets">
+            <button type="button" class="btn date-preset" data-preset="mission1" title="7 მაი — 17 მაი">I მივლ.</button>
+            <button type="button" class="btn date-preset" data-preset="mission2" title="25 მაი — 8 ივნ">II მივლ.</button>
+          </div>
+        </div>
+
         <div class="filter-item">
           <label>მენეჯერი</label>
 
@@ -118,40 +126,18 @@
 
             <div id="az-menu" class="az-menu">
               <label class="select-all-label">
-                <span class="az-text">ყველას მონიშვნა</span>
                 <input type="checkbox" id="az-select-all" class="az-opt" checked />
+                <span class="az-text">ყველას მონიშვნა</span>
               </label>
-
               <div class="az-divider"></div>
-
-              <label>
-                <span class="az-text">პირველადი აზომვა</span>
-                <input type="checkbox" class="az-opt" value="0" checked />
-              </label>
-
-              <label>
-                <span class="az-text">ცვლილება</span>
-                <input type="checkbox" class="az-opt" value="1" checked />
-              </label>
-
-              <label>
-                <span class="az-text">გადამოწმება</span>
-                <input type="checkbox" class="az-opt" value="2" checked />
-              </label>
-
-              <label>
-                <span class="az-text">წასაშლელი</span>
-                <input type="checkbox" class="az-opt" value="3" checked />
-              </label>
-
-              <label>
-                <span class="az-text">სპორადული</span>
-                <input type="checkbox" class="az-opt" value="4" checked />
-              </label>
-
-              <button id="az-ok" class="btn" style="width: 100%; margin-top: 8px">
-                OK
-              </button>
+              <div class="az-types-grid">
+                <label><input type="checkbox" class="az-opt" value="0" checked /><span class="az-text">პირვ. აზომვა</span></label>
+                <label><input type="checkbox" class="az-opt" value="1" checked /><span class="az-text">ცვლილება</span></label>
+                <label><input type="checkbox" class="az-opt" value="2" checked /><span class="az-text">გადამოწმება</span></label>
+                <label><input type="checkbox" class="az-opt" value="3" checked /><span class="az-text">წასაშლელი</span></label>
+                <label><input type="checkbox" class="az-opt" value="4" checked /><span class="az-text">სპორადული</span></label>
+              </div>
+              <button id="az-ok" class="btn" style="width:100%;margin-top:8px">OK</button>
             </div>
           </div>
         </div>
@@ -175,47 +161,53 @@
     <section class="content">
       <div id="view-table" class="view-section active">
         <div class="table-wrap">
+          <div class="table-toolbar">
+            <input type="text" id="table-search" class="table-search" placeholder="ძებნა TAG / CADCODE..." />
+            <span id="table-count" class="table-count"></span>
+            <div class="table-toolbar-right">
+              <div class="col-toggle-wrap">
+                <button id="btn-col-toggle" class="btn" style="height:36px;font-size:0.85rem;">სვეტები ▼</button>
+                <div id="col-menu" class="col-menu">
+                  <label><input type="checkbox" data-col="0" checked> TAG</label>
+                  <label><input type="checkbox" data-col="1" checked> CADCODE</label>
+                  <label><input type="checkbox" data-col="2" checked> DATE_</label>
+                  <label><input type="checkbox" data-col="3" checked> ZONE</label>
+                  <label><input type="checkbox" data-col="4" checked> SECTOR</label>
+                  <label><input type="checkbox" data-col="5" checked> FUNCTION</label>
+                  <label><input type="checkbox" data-col="6" checked> CATEGORY</label>
+                  <label><input type="checkbox" data-col="7" checked> აზომვის ტიპი</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <table id="tbl" class="table">
             <thead>
               <tr>
-                <th class="sortable" data-key="TAG">
-                  TAG <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="CADCODE">
-                  CADCODE <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="DATE_">
-                  DATE_ <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="ZONE">
-                  ZONE <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="SECTOR">
-                  SECTOR <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="FUNCTION">
-                  FUNCTION <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="CATEGORY">
-                  CATEGORY <span class="sort-icon"></span>
-                </th>
-                <th class="sortable" data-key="AZOMVIS_TIPI">
-                  აზომვის ტიპი <span class="sort-icon"></span>
-                </th>
+                <th class="sortable" data-key="TAG" data-col="0">TAG <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="CADCODE" data-col="1">CADCODE <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="DATE_" data-col="2">DATE_ <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="ZONE" data-col="3">ZONE <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="SECTOR" data-col="4">SECTOR <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="FUNCTION" data-col="5">FUNCTION <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="CATEGORY" data-col="6">CATEGORY <span class="sort-icon"></span></th>
+                <th class="sortable" data-key="AZOMVIS_TIPI" data-col="7">აზომვის ტიპი <span class="sort-icon"></span></th>
                 <th>ნახაზი</th>
               </tr>
             </thead>
-
             <tbody></tbody>
           </table>
+
+          <div id="pagination" class="pagination" style="display:none;"></div>
         </div>
       </div>
 
       <div id="view-report" class="view-section" style="display: none">
         <div class="rain-card">
           <div class="rain-card-header">
+            <div class="rain-card-icon">🌧</div>
             <div>
-              <div class="rain-title">🌧 წვიმიანი დღეების მართვა</div>
+              <div class="rain-title">წვიმიანი დღეების მართვა</div>
               <div class="rain-subtitle">
                 მონიშნე თარიღი და ზონა, რომელიც საშუალო მაჩვენებელში არ ჩაითვლება
               </div>
@@ -303,6 +295,10 @@
               <button type="button" id="btn-live-map">
                 რუკა
               </button>
+
+              <button type="button" id="btn-weather-layer" title="ამინდის ფენა">
+                ☁ ამინდი
+              </button>
             </div>
           </div>
 
@@ -312,28 +308,46 @@
           </div>
 
           <div id="live-map-view" style="display: none;">
-            <div class="map-legend">
-              <div class="legend-item">
-                <span class="legend-color legend-hot"></span>
-                <span>მაღალი აქტივობა</span>
-              </div>
 
-              <div class="legend-item">
-                <span class="legend-color legend-medium"></span>
-                <span>საშუალო აქტივობა</span>
+            <!-- Weather panel -->
+            <div id="weather-panel" class="weather-panel" style="display:none;">
+              <div class="wp-header">
+                <span class="wp-title">☁ ამინდი</span>
+                <button class="wp-icon-btn" id="btn-weather-refresh" title="განახლება">↻</button>
+                <button class="wp-icon-btn" id="btn-weather-close" title="დახურვა">✕</button>
               </div>
-
-              <div class="legend-item">
-                <span class="legend-color legend-low"></span>
-                <span>დაბალი აქტივობა</span>
+              <div class="wp-vars">
+                <button class="wp-var active" data-var="temp">🌡 ტემპ.</button>
+                <button class="wp-var" data-var="rain">🌧 წვიმა</button>
+                <button class="wp-var" data-var="wind">💨 ქარი</button>
+                <button class="wp-var" data-var="humidity">💧 ტენ.</button>
+                <button class="wp-var" data-var="cloud">☁ ღრუბ.</button>
+                <button class="wp-var" data-var="aqi">🌿 ჰაერი</button>
               </div>
-
-              <div class="legend-item">
-                <span class="legend-color legend-empty"></span>
-                <span>მონაცემები არ არის</span>
+              <div class="wp-periods">
+                <button class="wp-period active" data-period="now">ახლა</button>
+                <button class="wp-period" data-period="d1">24სთ</button>
+                <button class="wp-period" data-period="d3">3 დღე</button>
+                <button class="wp-period" data-period="d7">7 დღე</button>
               </div>
+              <div id="weather-legend-bar" class="weather-legend-bar"></div>
+              <div id="weather-status" class="weather-status" style="display:none;"></div>
             </div>
 
+            <div id="map-loading-overlay" class="map-loading-overlay" style="display:none;">
+              <div class="map-spinner"></div>
+              <span>რუკა იტვირთება...</span>
+            </div>
+            <div id="map-info-panel" class="map-info-panel hidden"></div>
+            <div class="map-legend-dynamic">
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#7f0000;"></span>ძალიან მაღალი</div>
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#ef4444;"></span>მაღალი</div>
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#f97316;"></span>საშუალო-მაღ.</div>
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#f59e0b;"></span>საშუალო</div>
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#3b82f6;"></span>დაბალი</div>
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#93c5fd;"></span>ძ. დაბალი</div>
+              <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#cbd5e1;"></span>მონ. არ არის</div>
+            </div>
             <div id="live-zone-map" class="live-zone-map"></div>
           </div>
         </div>
@@ -350,6 +364,7 @@
             <div class="canvas-container">
               <canvas id="chartZone"></canvas>
             </div>
+            <div id="chartZone-legend" class="zone-chart-legend"></div>
           </div>
 
           <div class="chart-card large">
@@ -367,28 +382,25 @@
           </div>
         </div>
 
-        <div class="table-wrap" style="margin-top: 30px">
-          <div style="
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              padding: 16px;
-              border-bottom: 1px solid var(--border);
-            ">
-            <h3 style="margin: 0; padding: 0; border: none">
-              დეტალური რეპორტი
-            </h3>
-
-            <button id="btn-excel" class="btn blue" style="
-                height: 36px;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-              ">
-              📥 Excel-ში შენახვა
-            </button>
+        <div class="report-toolbar">
+          <div class="report-toolbar-left">
+            <div class="report-toolbar-info">
+              <span class="report-export-title">დეტალური რეპორტი</span>
+              <span class="report-export-sub" id="report-export-count"></span>
+            </div>
           </div>
+          <div class="report-toolbar-center">
+            <button id="btn-rain-impact" class="btn report-tool-btn" type="button">🌧 ზეგავლენა</button>
+            <button id="btn-progress"    class="btn report-tool-btn" type="button">📊 პროგრეს</button>
+            <button id="btn-audit-log"   class="btn report-tool-btn" type="button" style="display:none;">📋 ლოგი</button>
+          </div>
+          <div class="report-toolbar-right">
+            <button id="btn-print-pdf" class="btn report-tool-btn" type="button">📄 PDF</button>
+            <button id="btn-excel"     class="btn blue report-export-btn" type="button">📥 Excel</button>
+          </div>
+        </div>
 
+        <div class="table-wrap" style="margin-top: 12px; display: none;">
           <table id="report-tbl" class="table report-table">
             <thead></thead>
             <tbody></tbody>
@@ -406,10 +418,58 @@
       username: "{{ username }}",
       displayName: "{{ user_display_name }}"
     };
+    window.OWM_API_KEY = "{{ owm_api_key }}";
   </script>
 
-  <!-- <script src="/static/app.js?v=3"></script> -->
-  <script src="/static/app.js?v=4"></script>
+  <div id="toast-container"></div>
+
+  <!-- ============ MODALS ============ -->
+  <div id="modal-overlay" class="modal-overlay" onclick="closeAllModals()"></div>
+
+  <!-- Progress Modal -->
+  <div id="modal-progress" class="modal-box" style="display:none;">
+    <div class="modal-header">
+      <span>📊 პროგრეს-ტრეკინგი</span>
+      <button class="modal-close-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="modal-body" id="progress-body">
+      <div class="modal-spinner"><div class="map-spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- Audit Log Modal -->
+  <div id="modal-audit" class="modal-box modal-wide" style="display:none;">
+    <div class="modal-header">
+      <span>📋 აუდიტ ლოგი</span>
+      <button class="modal-close-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="modal-body" id="audit-body">
+      <div class="modal-spinner"><div class="map-spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- Rain Impact Modal -->
+  <div id="modal-rain-impact" class="modal-box" style="display:none;">
+    <div class="modal-header">
+      <span>🌧 წვიმის ზეგავლენა</span>
+      <button class="modal-close-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="ri-date-row">
+        <div class="ri-field">
+          <label>თარიღიდან</label>
+          <input type="date" id="ri-from" />
+        </div>
+        <div class="ri-field">
+          <label>თარიღამდე</label>
+          <input type="date" id="ri-to" />
+        </div>
+        <button class="btn primary" id="ri-calc-btn" type="button">გამოთვლა</button>
+      </div>
+      <div id="rain-impact-result"></div>
+    </div>
+  </div>
+  <script src="/static/app.js?v=32"></script>
 </body>
 
 </html>

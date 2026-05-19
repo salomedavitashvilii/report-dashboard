@@ -1,4 +1,15 @@
-﻿const TABLE_RENDER_LIMIT = 500;
+﻿const PAGE_SIZE = 100;
+let currentPage = 1;
+let searchQuery = "";
+let hiddenCols = new Set();
+
+function escHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 let zoneSectorMap = {};
 let selectedZoneForSectors = null;
 let tableData = [];
@@ -61,6 +72,7 @@ function saveFiltersToStorage() {
   };
 
   localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filters));
+  syncFiltersToURL();
 }
 
 function loadFiltersFromStorage() {
@@ -98,6 +110,68 @@ function loadFiltersFromStorage() {
     }
   }
 }
+function syncFiltersToURL() {
+  const params = new URLSearchParams();
+  const zone    = document.getElementById("f-zone").value.trim();
+  const sector  = document.getElementById("f-sector").value.trim();
+  const from    = document.getElementById("f-from").value;
+  const to      = document.getElementById("f-to").value;
+  const manager = document.getElementById("manager-selected")?.dataset.value || "";
+  const azomvis = getSelectedAzomvis();
+
+  if (zone)    params.set("zone", zone);
+  if (sector)  params.set("sector", sector);
+  if (from)    params.set("from", from);
+  if (to)      params.set("to", to);
+  if (manager) params.set("manager", manager);
+  if (azomvis.length > 0 && azomvis.length < 5) params.set("azomvis", azomvis.join(","));
+
+  const newUrl = params.toString()
+    ? `${location.pathname}?${params.toString()}`
+    : location.pathname;
+  history.replaceState(null, "", newUrl);
+}
+
+function loadFiltersFromURL() {
+  const params = new URLSearchParams(location.search);
+  if (!params.toString()) return false;
+
+  if (params.get("zone"))    document.getElementById("f-zone").value    = params.get("zone");
+  if (params.get("sector"))  document.getElementById("f-sector").value  = params.get("sector");
+  if (params.get("from"))    document.getElementById("f-from").value    = params.get("from");
+  if (params.get("to"))      document.getElementById("f-to").value      = params.get("to");
+
+  const manager = params.get("manager");
+  if (manager) {
+    const el = document.getElementById("manager-selected");
+    if (el) {
+      el.dataset.value = manager;
+      el.textContent = (MANAGER_NAMES[Number(manager)] || "ყველა") + " ▼";
+    }
+  }
+
+  const azomvis = params.get("azomvis");
+  if (azomvis) setSelectedAzomvis(azomvis.split(","));
+
+  return true;
+}
+
+function initDatePresets() {
+  document.querySelectorAll(".date-preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.preset === "mission1") {
+        document.getElementById("f-from").value = "2026-05-07";
+        document.getElementById("f-to").value   = "2026-05-17";
+      } else if (btn.dataset.preset === "mission2") {
+        document.getElementById("f-from").value = "2026-05-25";
+        document.getElementById("f-to").value   = "2026-06-08";
+      }
+      saveFiltersToStorage();
+      loadData(false);
+    });
+  });
+}
+
 function renderActiveFilters() {
   const bar = document.getElementById("active-filters-bar");
   if (!bar) return;
@@ -268,64 +342,12 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  loadFiltersFromStorage();
+  if (!loadFiltersFromURL()) loadFiltersFromStorage();
   renderActiveFilters();
 
   const savedTab = loadActiveTab();
   if (savedTab) switchView(savedTab);
 
-  // document
-  //   .getElementById("f-zone")
-  //   .addEventListener("input", saveFiltersToStorage);
-  // document
-  //   .getElementById("f-sector")
-  //   .addEventListener("input", saveFiltersToStorage);
-  // document
-  //   .getElementById("f-from")
-  //   .addEventListener("change", saveFiltersToStorage);
-  // document
-  //   .getElementById("f-to")
-  //   .addEventListener("change", saveFiltersToStorage);
-
-  // document.getElementById("btn-load").addEventListener("click", () => {
-  //   saveFiltersToStorage();
-  //   loadData(false);
-  // });
-  // document.getElementById("btn-reset").addEventListener("click", resetFilters);
-  // document
-  //   .getElementById("btn-clear-active-filter")
-  //   .addEventListener("click", clearActiveZoneSectorFilter);
-  // if (document.getElementById("btn-add-rain")) {
-  //   document
-  //     .getElementById("btn-add-rain")
-  //     .addEventListener("click", addRainDay);
-  //   renderRainDays();
-  // }
-
-  // document
-  //   .getElementById("btn-refresh")
-  //   .addEventListener("click", () => loadData(true));
-  // document
-  //   .getElementById("btn-excel")
-  //   .addEventListener("click", exportReportToExcel);
-
-  // document.getElementById("tab-data").addEventListener("click", () => {
-  //   switchView("data");
-  //   saveActiveTab();
-  // });
-
-  // document.getElementById("tab-report").addEventListener("click", () => {
-  //   switchView("report");
-  //   saveActiveTab();
-  // });
-
-  // document.querySelectorAll("th.sortable").forEach((th) => {
-  //   th.addEventListener("click", () => handleSort(th.dataset.key));
-  // });
-
-  // document.getElementById("themeToggle").addEventListener("change", () => {
-  //   if (currentView === "report") updateCharts();
-  // });
   function on(id, event, handler) {
     const el = document.getElementById(id);
     if (el) {
@@ -372,17 +394,21 @@ window.addEventListener("DOMContentLoaded", () => {
 
   on("themeToggle", "change", () => {
     if (currentView === "report") updateCharts();
+    updateMapTileLayer();
   });
 
-  // const hasFilters =
-  //   document.getElementById("f-zone").value ||
-  //   document.getElementById("f-sector").value ||
-  //   document.getElementById("f-from").value ||
-  //   document.getElementById("f-to").value ||
-  //   (document.getElementById("manager-selected") &&
-  //     document.getElementById("manager-selected").dataset.value);
+  initColumnToggle();
+  initTableSearch();
+  initDatePresets();
+  initAdminTools();
+  initWeatherModule();
 
-  // if (hasFilters) loadData(false);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.closest(".filters-panel") && !e.target.closest(".az-menu")) {
+      saveFiltersToStorage();
+      loadData(false);
+    }
+  });
 });
 
 function switchView(view) {
@@ -424,6 +450,34 @@ function getCategoryGroup(row) {
 }
 
 let chartInstances = {};
+let _isLoading = false;
+
+function showToast(message, type = "success") {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => toast.classList.add("show"));
+  });
+
+  setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 350);
+  }, 3200);
+}
+
+function showTableSkeleton() {
+  const tbody = document.querySelector("#tbl tbody");
+  if (!tbody) return;
+  tbody.innerHTML = Array(8).fill(
+    `<tr class="skeleton-row">${Array(9).fill('<td><div class="skeleton-cell"></div></td>').join("")}</tr>`
+  ).join("");
+}
 
 function renderReport() {
   if (!tableData || tableData.length === 0) {
@@ -455,6 +509,7 @@ function renderReport() {
   renderZoneMap();
   renderPivotTable();
   renderActiveFilters();
+  refreshLiveMapStyles();
 }
 
 function updateKPIs() {
@@ -529,7 +584,16 @@ function updateKPIs() {
   document.getElementById("kpi-top-tag").innerText =
     `🏆 ${topTag} (${maxCount})`;
 
-  document.getElementById("kpi-cat-ratio").innerText = `${cat1} / ${cat2}`;
+  const catEl = document.getElementById("kpi-cat-ratio");
+  if (catEl) {
+    const cat1Percent = total > 0 ? ((cat1 / total) * 100).toFixed(1) : 0;
+    const cat2Percent = total > 0 ? ((cat2 / total) * 100).toFixed(1) : 0;
+    catEl.innerHTML = `<span class="kpi-number">${cat1} / ${cat2}</span>
+    <span class="kpi-hover-tooltip">
+      <span>საკარმიდამო: ${cat1Percent}%</span>
+      <span>სავარგული: ${cat2Percent}%</span>
+    </span>`;
+  }
 }
 
 function animateValue(id, end) {
@@ -540,20 +604,15 @@ function animateValue(id, end) {
   if (start === end) return;
 
   let current = start;
-  const range = end - start;
+  const range = Math.abs(end - start);
   const increment = end > start ? 1 : -1;
-  const step = Math.abs(Math.floor(2000 / range));
+  const step = Math.max(Math.floor(1500 / range), 10);
 
-  const timer = setInterval(
-    () => {
-      current += increment;
-      obj.innerText = current;
-      if (current == end) clearInterval(timer);
-    },
-    Math.max(step, 10),
-  );
-
-  obj.innerText = end;
+  const timer = setInterval(() => {
+    current += increment;
+    obj.innerText = current;
+    if (current === end) clearInterval(timer);
+  }, step);
 }
 let rainDaysCache = {};
 
@@ -564,16 +623,13 @@ function getRainDays() {
 async function fetchRainDays() {
   try {
     const res = await fetch("/api/rain-days");
-    const data = await res.json();
-
-    if (data.ok === false) {
-      console.error("Rain days error:", data.error);
+    if (!res.ok) {
       rainDaysCache = {};
-    } else {
-      rainDaysCache = data || {};
+      return rainDaysCache;
     }
+    const data = await res.json();
+    rainDaysCache = data.ok === false ? {} : (data || {});
   } catch (e) {
-    console.error("Rain days fetch error:", e);
     rainDaysCache = {};
   }
 
@@ -585,37 +641,49 @@ async function addRainDay() {
   const zone = document.getElementById("rain-zone").value.trim();
 
   if (!date || !zone) {
-    alert("აირჩიე თარიღიც და ზონაც");
+    showToast("აირჩიე თარიღიც და ზონაც", "warning");
     return;
   }
 
-  await fetch("/api/rain-days", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      date: date,
-      zone: zone,
-    }),
-  });
+  try {
+    const res = await fetch("/api/rain-days", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, zone }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      showToast("შეცდომა: " + (data.error || res.status), "error");
+      return;
+    }
+  } catch (e) {
+    showToast("კავშირის შეცდომა: " + e.message, "error");
+    return;
+  }
 
+  showToast(`წვიმიანი დღე დამატებულია: ${date} / ზონა ${zone}`, "success");
   await renderRainDays();
   renderReport();
 }
 
 async function removeRainDay(date, zone) {
-  await fetch("/api/rain-days", {
-    method: "DELETE",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      date: date,
-      zone: zone,
-    }),
-  });
+  try {
+    const res = await fetch("/api/rain-days", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, zone }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      showToast("შეცდომა: " + (data.error || res.status), "error");
+      return;
+    }
+  } catch (e) {
+    showToast("კავშირის შეცდომა: " + e.message, "error");
+    return;
+  }
 
+  showToast(`წაიშალა: ${date} / ზონა ${zone}`, "info");
   await renderRainDays();
   renderReport();
 }
@@ -632,11 +700,14 @@ async function renderRainDays() {
     zones.forEach((zone) => {
       const chip = document.createElement("span");
       chip.className = "rain-chip";
-      chip.innerHTML = `🌧 ${date} / ზონა ${zone} <span class="rain-remove">×</span>`;
 
-      chip.querySelector(".rain-remove").addEventListener("click", () => {
-        removeRainDay(date, zone);
-      });
+      const removeBtn = document.createElement("span");
+      removeBtn.className = "rain-remove";
+      removeBtn.textContent = "×";
+      removeBtn.addEventListener("click", () => removeRainDay(date, zone));
+
+      chip.textContent = `🌧 ${escHtml(date)} / ზონა ${escHtml(zone)} `;
+      chip.appendChild(removeBtn);
 
       container.appendChild(chip);
     });
@@ -812,6 +883,29 @@ function renderSectorPanel(zone, zoneName) {
     });
   });
 }
+const ZONE_NAMES_MAP = {
+  1: "თბილისი", 2: "რუსთავი", 3: "ქუთაისი", 4: "ფოთი", 5: "ბათუმი",
+  10: "გაგრა", 11: "გალი", 12: "გუდაუთა", 13: "გულრიფში", 14: "ოჩამჩირე",
+  15: "ქალაქი სოხუმი", 16: "სოხუმი", 17: "ზემო აფხაზეთი",
+  20: "ქობულეთი", 21: "ქედა", 22: "ხელვაჩაური", 23: "ხულო", 24: "შუახევი",
+  26: "ოზურგეთი", 27: "ლანჩხუთი", 28: "ჩოხატაური", 29: "წყალტუბო",
+  30: "ბაღდათი", 31: "ვანი", 32: "ზესტაფონი", 33: "თერჯოლა",
+  34: "სამტრედია", 35: "საჩხერე", 36: "ხარაგაული", 37: "ხონი",
+  38: "ჭიათურა", 39: "ტყიბული",
+  40: "აბაშა", 41: "მარტვილი", 42: "მესტია", 43: "ზუგდიდი",
+  44: "სენაკი", 45: "ხობი", 46: "ჩხოროწყუ", 47: "წალენჯიხა",
+  50: "ახმეტა", 51: "გურჯაანი", 52: "დედოფლისწყარო", 53: "თელავი",
+  54: "ლაგოდეხი", 55: "საგარეჯო", 56: "სიღნაღი", 57: "ყვარელი",
+  60: "ასპინძა", 61: "ადიგენი", 62: "ახალციხე", 63: "ახალქალაქი",
+  64: "ბორჯომი", 65: "ნინოწმინდა",
+  66: "გორი", 67: "კასპი", 68: "ქარელი", 69: "ხაშური",
+  70: "ახალგორი", 71: "დუშეთი", 72: "მცხეთა", 73: "თიანეთი", 74: "ყაზბეგი",
+  80: "ბოლნისი", 81: "გარდაბანი", 82: "დმანისი", 83: "მარნეული",
+  84: "თეთრიწყარო", 85: "წალკა",
+  86: "ამბროლაური", 87: "ლენტეხი", 88: "ონი", 89: "ცაგერი",
+  90: "ქურთა-ერედვი", 91: "ჯავა",
+};
+
 function renderZoneMap() {
   const mapContainer = document.getElementById("zone-map");
   if (!mapContainer) return;
@@ -1010,9 +1104,6 @@ function renderZoneMap() {
     counts[zone] = (counts[zone] || 0) + 1;
   });
 
-  console.log("ZONE COUNTS:", counts);
-  console.log("TABLE DATA LENGTH:", tableData.length);
-
   const maxCount = Math.max(...Object.values(counts), 1);
 
   const zonesToRender = showOnlyActiveZones
@@ -1085,6 +1176,14 @@ function renderZoneMap() {
 
 let liveZoneMapInstance = null;
 let liveZoneGeoJsonLayer = null;
+let liveMapTileLayer  = null;
+let isSatelliteMode   = false;
+
+const TILE_URLS = {
+  light:     "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+  dark:      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  satellite: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+};
 let cachedGeoJson = null;
 let cachedPreparedGeoJson = null;
 
@@ -1105,15 +1204,15 @@ function getMapCountsFromTableData() {
   return { zoneCounts, sectorCounts };
 }
 
-function getZoneColor(zone, count, maxCount) {
+function getZoneColorGradient(count, maxCount) {
   if (!count) return "#cbd5e1";
-
   const ratio = count / maxCount;
-
+  if (ratio >= 0.85) return "#7f0000";
   if (ratio >= 0.65) return "#ef4444";
-  if (ratio >= 0.3) return "#f59e0b";
-
-  return "#3b82f6";
+  if (ratio >= 0.45) return "#f97316";
+  if (ratio >= 0.30) return "#f59e0b";
+  if (ratio >= 0.15) return "#3b82f6";
+  return "#93c5fd";
 }
 function reprojectGeoJsonCoords(coords) {
   if (
@@ -1144,26 +1243,184 @@ function reprojectGeoJson(geojson) {
     })),
   };
 }
+function showMapLoading(show) {
+  const overlay = document.getElementById("map-loading-overlay");
+  if (!overlay) return;
+  overlay.style.display = show ? "flex" : "none";
+}
+
+function updateMapTileLayer() {
+  if (!liveZoneMapInstance || !liveMapTileLayer) return;
+  if (isSatelliteMode) {
+    liveMapTileLayer.setUrl(TILE_URLS.satellite);
+  } else {
+    const isDark = document.body.classList.contains("theme-dark");
+    liveMapTileLayer.setUrl(isDark ? TILE_URLS.dark : TILE_URLS.light);
+  }
+}
+
+function toggleSatellite() {
+  isSatelliteMode = !isSatelliteMode;
+  updateMapTileLayer();
+  const btn = document.getElementById("sat-toggle-btn");
+  if (btn) {
+    btn.textContent  = isSatelliteMode ? "🗺 რუკა" : "🛰 სატელიტი";
+    btn.classList.toggle("active", isSatelliteMode);
+  }
+}
+
+function applyZoneFilterFromMap(zone) {
+  document.getElementById("f-zone").value = zone;
+  saveFiltersToStorage();
+  switchView("data");
+  saveActiveTab();
+  loadData(false);
+}
+
+function showMapInfoPanel(zone, secCountsForZone) {
+  const panel = document.getElementById("map-info-panel");
+  if (!panel) return;
+
+  const zoneName = ZONE_NAMES_MAP[Number(zone)] || "";
+  const totalCount = Object.values(secCountsForZone).reduce((a, b) => a + b, 0);
+  const sorted = Object.entries(secCountsForZone).sort((a, b) => b[1] - a[1]);
+  const maxSec = sorted.length ? sorted[0][1] : 1;
+
+  const sectorRows = sorted.slice(0, 8).map(([sec, cnt]) => {
+    const pct = Math.round((cnt / maxSec) * 100);
+    return `<div class="map-panel-sector-row">
+      <span>სექტ. ${escHtml(sec)}</span>
+      <div style="flex:1;margin:0 8px;height:4px;border-radius:2px;background:var(--border);">
+        <div class="map-panel-bar" style="width:${pct}%;height:4px;"></div>
+      </div>
+      <strong>${cnt}</strong>
+    </div>`;
+  }).join("");
+
+  panel.innerHTML = `
+    <div class="map-panel-header">
+      <div>
+        <div class="map-panel-zone-num">ზონა ${escHtml(zone)}</div>
+        <div class="map-panel-zone-name">${escHtml(zoneName)}</div>
+      </div>
+      <button class="map-panel-close" id="map-panel-close-btn">✕</button>
+    </div>
+    <div class="map-panel-stat-label">სულ ნაკვეთი</div>
+    <div class="map-panel-stat-value">${totalCount}</div>
+    <div class="map-panel-divider"></div>
+    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);margin-bottom:6px;">სექტორები (TOP 8)</div>
+    ${sectorRows || '<div style="padding:4px 0;opacity:0.6;font-size:0.8rem;">სექტორები ვერ მოიძებნა</div>'}
+    <div class="map-panel-divider"></div>
+    <button class="map-panel-btn" id="map-panel-filter-btn">ამ ზონის ფილტრი</button>
+  `;
+
+  panel.classList.remove("hidden");
+
+  document.getElementById("map-panel-close-btn").addEventListener("click", () => {
+    panel.classList.add("hidden");
+  });
+
+  document.getElementById("map-panel-filter-btn").addEventListener("click", () => {
+    applyZoneFilterFromMap(zone);
+  });
+}
+
 function renderLiveZoneMap() {
   const mapEl = document.getElementById("live-zone-map");
   if (!mapEl) return;
 
   const { zoneCounts, sectorCounts } = getMapCountsFromTableData();
   const maxCount = Math.max(...Object.values(zoneCounts), 1);
+  const isDark = document.body.classList.contains("theme-dark");
+
+  showMapLoading(true);
+
 
   if (!liveZoneMapInstance) {
     liveZoneMapInstance = L.map("live-zone-map", {
-      zoomControl: true,
+      zoomControl: false,
       attributionControl: false,
     }).setView([42.1, 43.7], 8);
 
-    L.tileLayer("https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", {
-      maxZoom: 20,
-    }).addTo(liveZoneMapInstance);
+    L.control.zoom({ position: "bottomright" }).addTo(liveZoneMapInstance);
+
+    const ResetControl = L.Control.extend({
+      options: { position: "bottomright" },
+      onAdd() {
+        const btn = L.DomUtil.create("button", "map-reset-control");
+        btn.innerHTML = "⊞ სრული ხედი";
+        btn.title = "ფარგლების გადაყენება";
+        L.DomEvent.on(btn, "click", (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (liveZoneGeoJsonLayer) {
+            const b = liveZoneGeoJsonLayer.getBounds();
+            if (b.isValid()) {
+              const offset = document.fullscreenElement ? 0 : 1;
+              const z = liveZoneMapInstance.getBoundsZoom(b, false, L.point(5, 5)) + offset;
+              liveZoneMapInstance.setView(b.getCenter(), z);
+            }
+          }
+        });
+        return btn;
+      },
+    });
+    new ResetControl().addTo(liveZoneMapInstance);
+
+    const SatControl = L.Control.extend({
+      options: { position: "bottomright" },
+      onAdd() {
+        const btn = L.DomUtil.create("button", "map-sat-control");
+        btn.id        = "sat-toggle-btn";
+        btn.innerHTML = "🛰 სატელიტი";
+        btn.title     = "ორთოგრაფიული / ჩვეულებრივი რუკა";
+        L.DomEvent.on(btn, "click", (e) => { L.DomEvent.stopPropagation(e); toggleSatellite(); });
+        return btn;
+      },
+    });
+    new SatControl().addTo(liveZoneMapInstance);
+
+    // Fullscreen control
+    const FullscreenControl = L.Control.extend({
+      options: { position: "topright" },
+      onAdd() {
+        const btn = L.DomUtil.create("button", "map-fs-control");
+        btn.id    = "fs-toggle-btn";
+        btn.title = "სრული ეკრანი";
+        btn.innerHTML = "⛶";
+        L.DomEvent.on(btn, "click", (e) => {
+          L.DomEvent.stopPropagation(e);
+          const container = liveZoneMapInstance.getContainer();
+          if (!document.fullscreenElement) {
+            container.requestFullscreen().catch(() => {});
+            btn.innerHTML = "✕";
+            btn.title = "სრული ეკრანიდან გასვლა";
+          } else {
+            document.exitFullscreen();
+            btn.innerHTML = "⛶";
+            btn.title = "სრული ეკრანი";
+          }
+        });
+        document.addEventListener("fullscreenchange", () => {
+          if (!document.fullscreenElement) {
+            btn.innerHTML = "⛶";
+            btn.title = "სრული ეკრანი";
+            setTimeout(() => liveZoneMapInstance.invalidateSize(), 100);
+          }
+        });
+        return btn;
+      },
+    });
+    new FullscreenControl().addTo(liveZoneMapInstance);
+
+    liveMapTileLayer = L.tileLayer(TILE_URLS.light, { maxZoom: 20 }).addTo(liveZoneMapInstance);
+
+  } else {
+    updateMapTileLayer();
   }
 
   if (liveZoneGeoJsonLayer) {
     liveZoneMapInstance.removeLayer(liveZoneGeoJsonLayer);
+    liveZoneGeoJsonLayer = null;
   }
 
   const geoJsonPromise = cachedPreparedGeoJson
@@ -1179,81 +1436,119 @@ function renderLiveZoneMap() {
   geoJsonPromise
     .then((preparedGeojson) => {
       liveZoneGeoJsonLayer = L.geoJSON(preparedGeojson, {
-        style: function (feature) {
+        style(feature) {
           const zone = String(feature.properties.ZONE_ID || "").trim();
-          // const sector = String(feature.properties.SECTOR_ID || "").trim();
-          // const sectorKey = `${zone}.${sector}`;
-          // const count = sectorCounts[sectorKey] || 0;
           const count = zoneCounts[zone] || 0;
           return {
-            color: "#1e40af",
-            weight: 1,
-            fillColor: getZoneColor(zone, count, maxCount),
-            fillOpacity: count > 0 ? 0.55 : 0.15,
+            color: isDark ? "#475569" : "#1e40af",
+            weight: count > 0 ? 1.5 : 0.5,
+            fillColor: getZoneColorGradient(count, maxCount),
+            fillOpacity: count > 0 ? 0.72 : 0.12,
           };
         },
 
-        onEachFeature: function (feature, layer) {
+        onEachFeature(feature, layer) {
           const zone = String(feature.properties.ZONE_ID || "").trim();
           const sector = String(feature.properties.SECTOR_ID || "").trim();
           const sectorName = feature.properties.SECTOR_NAM || "";
-
           const sectorKey = `${zone}.${sector}`;
-          const sectorCount = sectorCounts[sectorKey] || 0;
-          const zoneCount = zoneCounts[zone] || 0;
+          const zoneName = ZONE_NAMES_MAP[Number(zone)] || "";
 
-          layer.bindTooltip(
-            `
-    <strong>ზონა:</strong> ${zone}<br>
-    <strong>სექტორი:</strong> ${sector}<br>
-    <strong>${sectorName}</strong><br><br>
+          function buildTip(zc, sc) {
+            return `<div class="zt-title">ზონა ${zone}${zoneName ? ` — ${zoneName}` : ""}</div>
+             <div class="zt-sub">სექტ. ${sector}${sectorName ? ` · ${sectorName}` : ""}</div>
+             <div class="zt-row"><span>სექტ. ნაკვეთი:</span><strong>${sc}</strong></div>
+             <div class="zt-row"><span>ზონა სულ:</span><strong>${zc}</strong></div>`;
+          }
 
-    <strong>სექტორში ნაკვეთები:</strong> ${sectorCount}<br>
-    <strong>ზონაში სულ:</strong> ${zoneCount}
-  `,
-            {
-              sticky: true,
-              direction: "top",
-              className: "zone-tooltip",
-            },
-          );
+          layer._zone = zone;
+          layer._sectorKey = sectorKey;
+          layer._tipHtml = buildTip(zoneCounts[zone] || 0, sectorCounts[sectorKey] || 0);
+          layer._buildTip = buildTip;
 
-          layer.on("mouseover", function () {
-            layer.setStyle({
-              weight: 3,
-              color: "#111827",
-              fillOpacity: 0.75,
-            });
+          layer.on("mouseover", function (e) {
+            if (!_zoneTooltip) {
+              _zoneTooltip = L.tooltip({ direction: "top", className: "zone-tooltip", opacity: 1 });
+            }
+            _zoneTooltip.setContent(layer._tipHtml).setLatLng(e.latlng);
+            if (!liveZoneMapInstance.hasLayer(_zoneTooltip)) _zoneTooltip.addTo(liveZoneMapInstance);
+            layer.setStyle({ weight: 2.5, color: "#f59e0b", fillOpacity: 0.82 });
+            layer.bringToFront();
+          });
+
+          layer.on("mousemove", function (e) {
+            if (_zoneTooltip) _zoneTooltip.setLatLng(e.latlng);
           });
 
           layer.on("mouseout", function () {
+            if (_zoneTooltip && liveZoneMapInstance.hasLayer(_zoneTooltip)) {
+              liveZoneMapInstance.removeLayer(_zoneTooltip);
+            }
             liveZoneGeoJsonLayer.resetStyle(layer);
           });
 
-          layer.on("click", function () {
-            document.getElementById("f-zone").value = zone;
-            saveFiltersToStorage();
-            // loadData(false);
+          layer.on("click", function (e) {
+            L.DomEvent.stopPropagation(e);
+            const secCountsForZone = {};
+            Object.entries(sectorCounts).forEach(([key, cnt]) => {
+              const [z, s] = key.split(".");
+              if (z === zone) secCountsForZone[s] = cnt;
+            });
+            showMapInfoPanel(zone, secCountsForZone);
           });
         },
       }).addTo(liveZoneMapInstance);
 
-      const bounds = liveZoneGeoJsonLayer.getBounds();
+      // Hide zone tooltip when mouse leaves the map
+      liveZoneMapInstance.on("mouseout", () => {
+        if (_zoneTooltip && liveZoneMapInstance.hasLayer(_zoneTooltip)) {
+          liveZoneMapInstance.removeLayer(_zoneTooltip);
+        }
+      });
 
+      const bounds = liveZoneGeoJsonLayer.getBounds();
       if (bounds.isValid()) {
-        liveZoneMapInstance.fitBounds(bounds, {
-          padding: [20, 20],
-        });
+        const z = liveZoneMapInstance.getBoundsZoom(bounds, false, L.point(5, 5)) + 1;
+        liveZoneMapInstance.setView(bounds.getCenter(), z);
       }
+
+      if (weatherActive) loadWeatherData(false);
 
       setTimeout(() => {
         liveZoneMapInstance.invalidateSize();
-      }, 200);
+        showMapLoading(false);
+      }, 250);
     })
     .catch((err) => {
       console.error("GeoJSON loading error:", err);
+      showMapLoading(false);
     });
 }
+
+function refreshLiveMapStyles() {
+  if (!liveZoneGeoJsonLayer) return;
+  if (weatherActive) { applyWeatherStyles(); return; }
+  const { zoneCounts, sectorCounts } = getMapCountsFromTableData();
+  const maxCount = Math.max(...Object.values(zoneCounts), 1);
+  const isDark = document.body.classList.contains("theme-dark");
+
+  liveZoneGeoJsonLayer.eachLayer((layer) => {
+    const zone = layer._zone;
+    const sectorKey = layer._sectorKey;
+    if (!zone) return;
+    const count = zoneCounts[zone] || 0;
+    layer.setStyle({
+      color: isDark ? "#475569" : "#1e40af",
+      weight: count > 0 ? 1.5 : 0.5,
+      fillColor: getZoneColorGradient(count, maxCount),
+      fillOpacity: count > 0 ? 0.72 : 0.12,
+    });
+    if (layer._buildTip) {
+      layer._tipHtml = layer._buildTip(zoneCounts[zone] || 0, sectorCounts[sectorKey] || 0);
+    }
+  });
+}
+
 function updateCharts() {
   const groupBy = (keyFn) => {
     const counts = {};
@@ -1327,6 +1622,20 @@ function updateCharts() {
     },
     {
       managerNames: !selectedManagerPrefix ? MANAGER_NAMES : null,
+      onClick: !selectedManagerPrefix
+        ? (_event, elements) => {
+            if (!elements.length) return;
+            const prefix = tagData[elements[0].index][0];
+            const el = document.getElementById("manager-selected");
+            if (!el) return;
+            el.dataset.value = prefix;
+            el.textContent = (MANAGER_NAMES[Number(prefix)] || prefix) + " ▼";
+            saveFiltersToStorage();
+            switchView("data");
+            saveActiveTab();
+            loadData(false);
+          }
+        : undefined,
     },
   );
 
@@ -1336,6 +1645,12 @@ function updateCharts() {
   const totalDailyAverage =
     daysCount > 0 ? Number((totalCount / daysCount).toFixed(1)) : 0;
 
+  const ZONE_COLORS = [
+    "#3b82f6","#ef4444","#10b981","#f59e0b","#8b5cf6","#6366f1",
+    "#ec4899","#14b8a6","#f97316","#84cc16","#06b6d4","#a855f7",
+    "#e11d48","#0ea5e9","#d97706","#16a34a","#7c3aed","#db2777",
+  ];
+
   createChart(
     "chartZone",
     "doughnut",
@@ -1344,22 +1659,35 @@ function updateCharts() {
       datasets: [
         {
           data: zoneData.map((x) => x[1]),
-          backgroundColor: [
-            "#3b82f6",
-            "#ef4444",
-            "#10b981",
-            "#f59e0b",
-            "#8b5cf6",
-            "#6366f1",
-          ],
+          backgroundColor: zoneData.map((_, i) => ZONE_COLORS[i % ZONE_COLORS.length]),
         },
       ],
     },
     {
       centerText: totalDailyAverage,
       centerTooltip: "საერთო დღიური საშუალო",
+      hideLegend: true,
+      onClick: (_event, elements) => {
+        if (!elements.length) return;
+        const zone = zoneData[elements[0].index][0];
+        document.getElementById("f-zone").value = zone;
+        saveFiltersToStorage();
+        switchView("data");
+        saveActiveTab();
+        loadData(false);
+      },
     },
   );
+
+  const zoneLegendEl = document.getElementById("chartZone-legend");
+  if (zoneLegendEl) {
+    zoneLegendEl.innerHTML = zoneData.map((x, i) => `
+      <div class="zl-item">
+        <span class="zl-dot" style="background:${ZONE_COLORS[i % ZONE_COLORS.length]}"></span>
+        <span class="zl-label">${escHtml(x[0])}</span>
+        <span class="zl-count">${x[1]}</span>
+      </div>`).join("");
+  }
 
   const dateCounts = {};
 
@@ -1396,6 +1724,10 @@ function updateCharts() {
     ],
   });
 }
+
+// Single shared zone tooltip (prevents duplicates on adjacent sectors)
+let _zoneTooltip = null;
+
 
 function createChart(canvasId, type, dataConfig, extraOptions = {}) {
   const ctx = document.getElementById(canvasId).getContext("2d");
@@ -1444,10 +1776,14 @@ function createChart(canvasId, type, dataConfig, extraOptions = {}) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: extraOptions.onClick || undefined,
+      onHover: extraOptions.onClick
+        ? (evt, active) => { if (evt.native) evt.native.target.style.cursor = active.length ? "pointer" : "default"; }
+        : undefined,
 
       plugins: {
         legend: {
-          display: type !== "bar",
+          display: type !== "bar" && !extraOptions.hideLegend,
           labels: { color: textColor },
         },
 
@@ -1516,16 +1852,6 @@ function renderPivotTable() {
   const tbody = document.querySelector("#report-tbl tbody");
 
   tbody.innerHTML = "";
-  if (tableData.length > TABLE_RENDER_LIMIT) {
-    const trLimit = document.createElement("tr");
-    trLimit.innerHTML = `
-    <td colspan="9" class="table-limit-note">
-      ნაჩვენებია პირველი ${TABLE_RENDER_LIMIT} ჩანაწერი ${tableData.length}-დან.
-      სრული მონაცემები გამოიყენება რეპორტსა და Excel export-ში.
-    </td>
-  `;
-    tbody.appendChild(trLimit);
-  }
   thead.innerHTML = "";
 
   const pivotData = {};
@@ -1635,6 +1961,8 @@ function renderPivotTable() {
 }
 
 function loadData(forceRefresh = false) {
+  if (_isLoading) return;
+
   const z = document.getElementById("f-zone").value.trim();
   const s = document.getElementById("f-sector").value.trim();
   const df = document.getElementById("f-from").value;
@@ -1648,92 +1976,109 @@ function loadData(forceRefresh = false) {
 
   const qs = new URLSearchParams();
 
+  const managerPrefix = document.getElementById("manager-selected")?.dataset.value || "";
+
   if (z) qs.set("zone", splitMulti(z).join(" "));
   if (s) qs.set("sector", splitMulti(s).join(" "));
   if (df && !dt) dt = df;
   if (df) qs.set("date_from", df);
   if (dt) qs.set("date_to", dt);
   if (azVals.length) qs.set("azomvis", azVals.join(" "));
+  if (managerPrefix) qs.set("manager", managerPrefix);
   if (forceRefresh) qs.set("refresh", "1");
 
   setStatus("");
+  _isLoading = true;
   setLoading(true);
+  if (currentView === "data") showTableSkeleton();
+  currentPage = 1;
+  searchQuery = "";
+  const searchEl = document.getElementById("table-search");
+  if (searchEl) searchEl.value = "";
 
   (async () => {
     try {
-      console.log("API URL:", "/api/data?" + qs.toString());
       const res = await fetch("/api/data?" + qs.toString());
 
       if (!res.ok) {
-        throw new Error(`HTTP error! ${res.status}`);
+        throw new Error(`სერვერის შეცდომა: ${res.status}`);
       }
 
       const data = await res.json();
 
-      let items = data.items || [];
-
-      const managerSelected = document.getElementById("manager-selected");
-
-      const selectedManagerPrefix = managerSelected
-        ? managerSelected.dataset.value || ""
-        : "";
-
-      if (selectedManagerPrefix) {
-        items = items.filter((row) => {
-          const rowPrefix = getManagerPrefixFromTag(row.TAG);
-          return rowPrefix === selectedManagerPrefix;
-        });
+      if (data.ok === false) {
+        throw new Error(data.error || "მონაცემები ვერ მოიძებნა");
       }
 
-      tableData = items;
+      tableData = data.items || [];
+
+      const exportCountEl = document.getElementById("report-export-count");
+      if (exportCountEl) exportCountEl.textContent = `სულ ${tableData.length} ჩანაწერი`;
 
       if (currentView === "data") {
         if (sortState.key) doSort(sortState.key, sortState.asc);
-
-        setTimeout(() => {
-          renderTable();
-          renderActiveFilters();
-        }, 0);
+        setTimeout(() => { renderTable(); renderActiveFilters(); }, 0);
       } else {
-        setTimeout(() => {
-          renderReport();
-          renderActiveFilters();
-        }, 0);
+        setTimeout(() => { renderReport(); renderActiveFilters(); }, 0);
       }
 
-      // setStatus(`მიღებულია: ${tableData.length} ჩანაწერი`);
       setStatus(`მიღებულია: ${tableData.length} ჩანაწერი`);
-      console.log("API response:", data);
-      console.log("items length:", items.length);
-      console.log("first item:", items[0]);
+      showToast(`${tableData.length} ჩანაწერი ჩაიტვირთა`, "success");
       updateActiveFilterButton();
     } catch (error) {
       setStatus(`შეცდომა: ${error.message}`);
+      showToast(error.message, "error");
     } finally {
+      _isLoading = false;
       setLoading(false);
     }
   })();
 }
 
+function getFilteredTableData() {
+  if (!searchQuery) return tableData;
+  const q = searchQuery.toLowerCase();
+  return tableData.filter(
+    (row) =>
+      String(row.TAG || "").toLowerCase().includes(q) ||
+      String(row.CADCODE || "").toLowerCase().includes(q)
+  );
+}
+
 function renderTable() {
   const tbody = document.querySelector("#tbl tbody");
-
   if (!tbody) return;
 
   activeMaps = {};
   tbody.innerHTML = "";
-  if (!tableData || tableData.length === 0) {
-    tbody.innerHTML = `
-    <tr>
-      <td colspan="9" class="empty-state">
-        ამ ფილტრებით ჩანაწერი ვერ მოიძებნა. სცადე თარიღის, ზონის ან სექტორის შეცვლა.
-      </td>
-    </tr>
-  `;
+
+  const filtered = getFilteredTableData();
+  const totalFiltered = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
+
+  if (currentPage > totalPages) currentPage = totalPages;
+
+  const countEl = document.getElementById("table-count");
+  if (countEl) {
+    if (searchQuery) {
+      countEl.textContent = `${totalFiltered} / ${tableData.length} ჩანაწერი`;
+    } else {
+      countEl.textContent = `სულ: ${tableData.length} ჩანაწერი`;
+    }
+  }
+
+  if (totalFiltered === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">ჩანაწერი ვერ მოიძებნა.</td></tr>`;
+    renderPagination(0, 0);
     return;
   }
 
-  tableData.slice(0, TABLE_RENDER_LIMIT).forEach((row, i) => {
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageData = filtered.slice(start, start + PAGE_SIZE);
+
+  const colCount = 9;
+  pageData.forEach((row, relIdx) => {
+    const i = start + relIdx;
     const mapId = `map-${i}`;
     const expId = `exp-${i}`;
 
@@ -1742,47 +2087,161 @@ function renderTable() {
       : '{"type": "Point", "coordinates": [44.78, 41.72]}';
 
     const tr = document.createElement("tr");
+    const cells = [
+      escHtml(row.TAG),
+      escHtml(row.CADCODE),
+      escHtml(row.DATE_),
+      escHtml(row.ZONE),
+      escHtml(row.SECTOR),
+      escHtml(row.FUNCTION_LABEL || row.FUNCTION),
+      escHtml(row.CATEGORY_LABEL || row.CATEGORY),
+      escHtml(row.AZOMVIS_TIPI_LABEL || row.AZOMVIS_TIPI),
+    ];
 
-    tr.innerHTML = `<td>${row.TAG || ""}</td><td>${row.CADCODE || ""}</td><td>${
-      row.DATE_ || ""
-    }</td><td>${row.ZONE || ""}</td><td>${row.SECTOR || ""}</td><td>${
-      row.FUNCTION_LABEL || row.FUNCTION || ""
-    }</td><td>${row.CATEGORY_LABEL || row.CATEGORY || ""}</td><td>${
-      row.AZOMVIS_TIPI_LABEL || row.AZOMVIS_TIPI || ""
-    }</td><td><button class="btn blue btn-draw" data-i="${i}">ნახაზი</button></td>`;
+    cells.forEach((val, colIdx) => {
+      const td = document.createElement("td");
+      td.textContent = val;
+      if (hiddenCols.has(colIdx)) td.style.display = "none";
+      tr.appendChild(td);
+    });
+
+    const tdBtn = document.createElement("td");
+    tdBtn.className = "td-actions";
+    const drawBtn = document.createElement("button");
+    drawBtn.className = "btn blue btn-draw";
+    drawBtn.dataset.i = i;
+    drawBtn.textContent = "ნახაზი";
+    tdBtn.appendChild(drawBtn);
+
+    if (row.CADCODE) {
+      const oqmiUrl = `https://api.napr.gov.ge/lr/redi?pid=101&FRAME_NAME=REDI.APP.PAGE&FRAME=MAIN.FORM.REDI&FLD_PAPER_ID=&REGNUMBER=&CADCODE=${encodeURIComponent(String(row.CADCODE).trim())}&WEB_NUMBER=&OWNER_IDN=&PRSN_IDN=&TAG=&PERPAGE=10&DATE1=&DATE2=&REGION=&ZONE=&SECTOR=&GL_FLD_SURVEY_ID=&CREATOR=&CALL_STATUS=&SURVEY_TYPE=&STATUS=&FLAG=&finishPAPER=find#`;
+      const oqmiBtn = document.createElement("a");
+      oqmiBtn.className = "btn oqmi-btn";
+      oqmiBtn.href = oqmiUrl;
+      oqmiBtn.target = "_blank";
+      oqmiBtn.rel = "noopener noreferrer";
+      oqmiBtn.textContent = "ოქმი";
+      tdBtn.appendChild(oqmiBtn);
+    }
+
+    tr.appendChild(tdBtn);
 
     const trExp = document.createElement("tr");
     trExp.className = "expander-row";
     trExp.id = expId;
+    trExp.innerHTML = `<td colspan="${colCount}"><div class="mini-detail"><div id="${mapId}" class="mini-map"></div><textarea class="geom-text" readonly>${geomText}</textarea></div></td>`;
 
-    trExp.innerHTML = `<td colspan="9"><div class="mini-detail"><div id="${mapId}" class="mini-map"></div><textarea class="geom-text" readonly>${geomText}</textarea></div></td>`;
-
-    tr.querySelector(".btn-draw").addEventListener("click", (e) => {
-      const btn = e.currentTarget;
+    drawBtn.addEventListener("click", () => {
       const exp = document.getElementById(expId);
       const isOpen = exp.style.display === "table-row";
-
-      btn.classList.toggle("active", !isOpen);
+      drawBtn.classList.toggle("active", !isOpen);
 
       if (isOpen) {
         exp.style.display = "none";
-
-        if (activeMaps[mapId]) {
-          activeMaps[mapId].remove();
-          delete activeMaps[mapId];
-        }
+        if (activeMaps[mapId]) { activeMaps[mapId].remove(); delete activeMaps[mapId]; }
       } else {
         exp.style.display = "table-row";
         initMiniMap(i, geomText);
-
-        setTimeout(() => {
-          if (activeMaps[mapId]) activeMaps[mapId].invalidateSize();
-        }, 150);
+        setTimeout(() => { if (activeMaps[mapId]) activeMaps[mapId].invalidateSize(); }, 150);
       }
     });
 
     tbody.appendChild(tr);
     tbody.appendChild(trExp);
+  });
+
+  renderPagination(totalFiltered, totalPages);
+  applyColumnVisibility();
+}
+
+function renderPagination(total, totalPages) {
+  const pg = document.getElementById("pagination");
+  if (!pg) return;
+
+  if (totalPages <= 1) { pg.style.display = "none"; return; }
+
+  pg.style.display = "flex";
+  pg.innerHTML = "";
+
+  const addBtn = (label, page, disabled = false, active = false) => {
+    const btn = document.createElement("button");
+    btn.className = "page-btn" + (active ? " active" : "");
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.addEventListener("click", () => {
+      currentPage = page;
+      Object.values(activeMaps).forEach((m) => m.remove());
+      activeMaps = {};
+      renderTable();
+    });
+    pg.appendChild(btn);
+  };
+
+  addBtn("«", 1, currentPage === 1);
+  addBtn("‹", currentPage - 1, currentPage === 1);
+
+  const range = 2;
+  for (let p = Math.max(1, currentPage - range); p <= Math.min(totalPages, currentPage + range); p++) {
+    addBtn(p, p, false, p === currentPage);
+  }
+
+  addBtn("›", currentPage + 1, currentPage === totalPages);
+  addBtn("»", totalPages, currentPage === totalPages);
+
+  const info = document.createElement("span");
+  info.className = "page-info";
+  const start = (currentPage - 1) * PAGE_SIZE + 1;
+  const end = Math.min(currentPage * PAGE_SIZE, total);
+  info.textContent = `${start}–${end} / ${total}`;
+  pg.appendChild(info);
+}
+
+function applyColumnVisibility() {
+  document.querySelectorAll("#tbl thead th[data-col]").forEach((th) => {
+    const col = Number(th.dataset.col);
+    th.style.display = hiddenCols.has(col) ? "none" : "";
+  });
+  document.querySelectorAll("#tbl tbody tr:not(.expander-row) td:not(:last-child)").forEach((td, idx) => {
+    const col = idx % 8;
+    td.style.display = hiddenCols.has(col) ? "none" : "";
+  });
+}
+
+function initColumnToggle() {
+  const btn = document.getElementById("btn-col-toggle");
+  const menu = document.getElementById("col-menu");
+  if (!btn || !menu) return;
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("show");
+  });
+
+  menu.querySelectorAll("input[data-col]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const col = Number(cb.dataset.col);
+      if (cb.checked) hiddenCols.delete(col);
+      else hiddenCols.add(col);
+      applyColumnVisibility();
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".col-toggle-wrap")) menu.classList.remove("show");
+  });
+}
+
+function initTableSearch() {
+  const input = document.getElementById("table-search");
+  if (!input) return;
+  let _debounce = null;
+  input.addEventListener("input", () => {
+    clearTimeout(_debounce);
+    _debounce = setTimeout(() => {
+      searchQuery = input.value.trim();
+      currentPage = 1;
+      renderTable();
+    }, 250);
   });
 }
 
@@ -1842,12 +2301,14 @@ function initProj4() {
 }
 
 function initDateInputs() {
+  const today = new Date().toISOString().slice(0, 10);
   const f = document.getElementById("f-from");
+  const t = document.getElementById("f-to");
+  const r = document.getElementById("rain-date");
 
-  if (f) {
-    f.value = new Date().toISOString().slice(0, 10);
-    document.getElementById("f-to").value = "";
-  }
+  if (f) { f.value = today; f.max = today; }
+  if (t) { t.value = ""; t.max = today; }
+  if (r) { r.max = today; }
 }
 
 function initDropdowns() {
@@ -1860,6 +2321,7 @@ function initDropdowns() {
   if (d && m) {
     d.addEventListener("click", (e) => {
       e.stopPropagation();
+      document.getElementById("manager-menu")?.classList.remove("show");
       m.classList.toggle("show");
     });
 
@@ -1899,6 +2361,7 @@ function initDropdowns() {
   if (managerSelected && managerMenu) {
     managerSelected.addEventListener("click", (e) => {
       e.stopPropagation();
+      document.getElementById("az-menu")?.classList.remove("show");
       managerMenu.classList.toggle("show");
     });
 
@@ -2020,7 +2483,7 @@ function reprojectCoordinates(c) {
 
 function exportReportToExcel() {
   if (!tableData || tableData.length === 0) {
-    alert("მონაცემები არ არის");
+    showToast("ექსპორტისთვის მონაცემები არ არის", "warning");
     return;
   }
 
@@ -2120,6 +2583,7 @@ function exportReportToExcel() {
 
   const dateStr = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `WFS_Report_${dateStr}.xlsx`);
+  showToast(`Excel შეინახა: WFS_Report_${dateStr}.xlsx`, "success");
 }
 
 function initMapToggle() {
@@ -2199,13 +2663,24 @@ function updateActiveFilterButton() {
 
   const zone = document.getElementById("f-zone").value.trim();
   const sector = document.getElementById("f-sector").value.trim();
+  const dateFrom = document.getElementById("f-from").value;
+  const dateTo = document.getElementById("f-to").value;
+  const manager = document.getElementById("manager-selected")?.dataset.value || "";
 
-  btn.style.display = zone || sector ? "inline-flex" : "none";
+  btn.style.display = (zone || sector || dateFrom || dateTo || manager) ? "inline-flex" : "none";
 }
 
 function clearActiveZoneSectorFilter() {
   document.getElementById("f-zone").value = "";
   document.getElementById("f-sector").value = "";
+  document.getElementById("f-from").value = "";
+  document.getElementById("f-to").value = "";
+
+  const managerSelected = document.getElementById("manager-selected");
+  if (managerSelected) {
+    managerSelected.dataset.value = "";
+    managerSelected.textContent = "ყველა ▼";
+  }
 
   saveFiltersToStorage();
   updateActiveFilterButton();
@@ -2298,4 +2773,594 @@ function renderTopZones() {
       `,
     )
     .join("");
+}
+
+// =========================
+// MODALS CORE
+// =========================
+
+function openModal(id) {
+  document.getElementById("modal-overlay").classList.add("open");
+  document.getElementById(id).style.display = "flex";
+}
+
+function closeAllModals() {
+  document.getElementById("modal-overlay").classList.remove("open");
+  ["modal-progress", "modal-audit", "modal-rain-impact"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
+}
+
+// =========================
+// AUDIT LOG
+// =========================
+
+async function openAuditModal() {
+  openModal("modal-audit");
+  const body = document.getElementById("audit-body");
+  body.innerHTML = '<div class="modal-spinner"><div class="map-spinner"></div></div>';
+  try {
+    const res  = await fetch("/api/audit-log");
+    const json = await res.json();
+    if (!json.ok) { body.innerHTML = `<div class="ri-empty">შეცდომა: ${json.error}</div>`; return; }
+    if (!json.items.length) { body.innerHTML = '<div class="ri-empty">ჩანაწერები არ არის</div>'; return; }
+    const rows = json.items.map((r) => {
+      const chip = `<span class="audit-action-chip ${r.action}">${r.action}</span>`;
+      return `<tr>
+        <td style="color:var(--muted);white-space:nowrap;">${r.ts}</td>
+        <td style="font-weight:600;">${escHtml(r.username)}</td>
+        <td>${chip}</td>
+        <td>${escHtml(r.details || "")}</td>
+      </tr>`;
+    }).join("");
+    body.innerHTML = `
+      <table class="audit-table">
+        <thead><tr><th>დრო (UTC)</th><th>მომხმარებელი</th><th>მოქმედება</th><th>დეტალი</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch {
+    body.innerHTML = `<div class="ri-empty">ჩატვირთვის შეცდომა</div>`;
+  }
+}
+
+// =========================
+// PROGRESS TRACKING
+// =========================
+
+async function openProgressModal() {
+  openModal("modal-progress");
+  const body = document.getElementById("progress-body");
+  body.innerHTML = '<div class="modal-spinner"><div class="map-spinner"></div></div>';
+  try {
+    const targets = await fetch("/api/targets").then((r) => r.json());
+    const zoneCounts = {};
+    tableData.forEach((row) => {
+      const z = String(row.ZONE || "").trim();
+      if (z) zoneCounts[z] = (zoneCounts[z] || 0) + 1;
+    });
+
+    const zones = Object.keys(zoneCounts).sort((a, b) => Number(a) - Number(b));
+    if (!zones.length) {
+      body.innerHTML = '<div class="ri-empty">მონაცემები არ არის — ჯერ ჩატვირთეთ ფილტრი</div>';
+      return;
+    }
+
+    const isAdm = window.currentUser?.username === "Lnukradze";
+
+    const rows = zones.map((z) => {
+      const actual = zoneCounts[z] || 0;
+      const target = targets[z]    || 0;
+      const pct    = target > 0 ? Math.min((actual / target) * 100, 100) : 0;
+      const over   = target > 0 && actual >= target;
+      const pctTxt = target > 0
+        ? `${actual}/${target} (${Math.round(pct)}%)`
+        : `${actual} / სამიზნე არ არის`;
+      const tInput = isAdm
+        ? `<input class="prog-target-input" id="ti-${z}" type="number" min="0" value="${target}" />
+           <button class="prog-save-btn" onclick="saveTarget('${z}')">✓</button>`
+        : `<span style="color:var(--muted);font-size:0.78rem;">${target || "—"}</span>`;
+      return `
+        <div class="prog-zone-row">
+          <div class="prog-zone-label">ზონა ${z}</div>
+          <div class="prog-bar-wrap">
+            <div class="prog-bar-fill ${over ? "over" : ""}" style="width:${pct}%"></div>
+          </div>
+          <div class="prog-count">${pctTxt}</div>
+          ${tInput}
+        </div>`;
+    }).join("");
+
+    body.innerHTML = `
+      <div class="prog-section-title">
+        ${isAdm ? "სამიზნეების შეყვანა: ✓ ღილაკით შეინახეთ" : "ზონების პროგრესი"}
+        &nbsp;·&nbsp; სულ: <strong>${tableData.length}</strong> ჩანაწერი
+      </div>
+      ${rows}`;
+  } catch {
+    body.innerHTML = `<div class="ri-empty">ჩატვირთვის შეცდომა</div>`;
+  }
+}
+
+async function saveTarget(zone) {
+  const inp = document.getElementById(`ti-${zone}`);
+  if (!inp) return;
+  const target = parseInt(inp.value, 10) || 0;
+  try {
+    const res  = await fetch("/api/targets", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ zone, target }),
+    });
+    const json = await res.json();
+    if (json.ok) { showToast(`ზონა ${zone}: სამიზნე — ${target}`); openProgressModal(); }
+    else         { showToast("შეცდომა: " + json.error); }
+  } catch { showToast("შეცდომა შენახვისას"); }
+}
+
+// =========================
+// RAIN IMPACT
+// =========================
+
+async function calcRainImpact() {
+  const from = document.getElementById("ri-from").value;
+  const to   = document.getElementById("ri-to").value;
+  const res  = document.getElementById("rain-impact-result");
+  if (!from || !to) { showToast("მიუთითეთ თარიღის დიაპაზონი"); return; }
+  res.innerHTML = '<div class="modal-spinner"><div class="map-spinner"></div></div>';
+  try {
+    const r    = await fetch(`/api/rain-impact?date_from=${from}&date_to=${to}`);
+    const json = await r.json();
+    if (!json.ok) { res.innerHTML = `<div class="ri-empty">შეცდომა: ${json.error}</div>`; return; }
+
+    const rainRows = Object.entries(json.rain_by_date)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([d, zones]) => `
+        <div class="ri-rain-row">
+          <span class="ri-rain-date">🌧 ${d}</span>
+          <span class="ri-rain-zones">ზონები: ${zones.join(", ")}</span>
+        </div>`).join("")
+      || '<div class="ri-empty">წვიმიანი დღეები ამ პერიოდში არ მოიძებნა</div>';
+
+    res.innerHTML = `
+      <div class="ri-stats-grid">
+        <div class="ri-stat">
+          <div class="ri-stat-val">${json.total_days}</div>
+          <div class="ri-stat-lbl">კალენდ. დღე</div>
+        </div>
+        <div class="ri-stat">
+          <div class="ri-stat-val">${json.working_days}</div>
+          <div class="ri-stat-lbl">სამუშაო დღე</div>
+        </div>
+        <div class="ri-stat danger">
+          <div class="ri-stat-val">${json.rain_working}</div>
+          <div class="ri-stat-lbl">წვიმ. სამ. დღე</div>
+        </div>
+        <div class="ri-stat success">
+          <div class="ri-stat-val">${json.net_working}</div>
+          <div class="ri-stat-lbl">ნეტო სამ. დღე</div>
+        </div>
+        <div class="ri-stat danger">
+          <div class="ri-stat-val">${json.lost_hours}</div>
+          <div class="ri-stat-lbl">დაკარგ. საათი</div>
+        </div>
+        <div class="ri-stat">
+          <div class="ri-stat-val">${json.rain_days}</div>
+          <div class="ri-stat-lbl">წვიმ. დღის ჩანაწ.</div>
+        </div>
+      </div>
+      <div class="ri-rain-list-title">წვიმიანი დღეები:</div>
+      <div class="ri-rain-list">${rainRows}</div>`;
+  } catch {
+    res.innerHTML = '<div class="ri-empty">ჩატვირთვის შეცდომა</div>';
+  }
+}
+
+// =========================
+// PDF / PRINT REPORT
+// =========================
+
+function printReport() {
+  if (!tableData.length) { showToast("პირველ ჩატვირთეთ მონაცემები"); return; }
+
+  const zone   = document.getElementById("f-zone").value   || "ყველა";
+  const sector = document.getElementById("f-sector").value || "ყველა";
+  const from   = document.getElementById("f-from").value   || "—";
+  const to     = document.getElementById("f-to").value     || "—";
+  const now    = new Date().toLocaleString("ka-GE", { hour12: false });
+
+  const zoneSums = {};
+  const typeSums = {};
+  tableData.forEach((r) => {
+    const z = r.ZONE || "?";              zoneSums[z] = (zoneSums[z] || 0) + 1;
+    const t = r.AZOMVIS_TIPI_LABEL || "?"; typeSums[t] = (typeSums[t] || 0) + 1;
+  });
+
+  const zoneRows = Object.entries(zoneSums)
+    .sort(([, a], [, b]) => b - a).slice(0, 15)
+    .map(([z, n]) => `<tr><td>ზონა ${z}</td><td>${n}</td></tr>`).join("");
+  const typeRows = Object.entries(typeSums)
+    .map(([t, n]) => `<tr><td>${t}</td><td>${n}</td></tr>`).join("");
+  const dataRows = tableData.slice(0, 500)
+    .map((r) => `<tr>
+      <td>${escHtml(r.TAG)}</td>
+      <td>${escHtml(r.CADCODE)}</td>
+      <td>${String(r.DATE_ || "").slice(0, 10)}</td>
+      <td>${escHtml(r.ZONE)}</td>
+      <td>${escHtml(r.SECTOR)}</td>
+      <td>${escHtml(r.AZOMVIS_TIPI_LABEL)}</td>
+    </tr>`).join("");
+
+  const win = window.open("", "_blank");
+  win.document.write(`<!DOCTYPE html><html lang="ka"><head>
+    <meta charset="utf-8">
+    <title>ანგარიში ${from}/${to}</title>
+    <style>
+      body{font-family:"Sylfaen","DejaVu Sans",sans-serif;font-size:11px;color:#111;margin:24px;}
+      h1{font-size:16px;margin:0 0 4px;}
+      .meta{color:#555;font-size:10px;margin-bottom:16px;}
+      .summary{display:flex;gap:16px;margin-bottom:18px;flex-wrap:wrap;}
+      .sum-box{border:1px solid #ccc;border-radius:6px;padding:10px 16px;min-width:110px;}
+      .sum-val{font-size:22px;font-weight:700;color:#1e40af;}
+      .sum-lbl{font-size:9px;color:#555;margin-top:2px;}
+      h2{font-size:12px;margin:14px 0 5px;border-bottom:1px solid #ccc;padding-bottom:3px;}
+      table{border-collapse:collapse;width:100%;margin-bottom:12px;}
+      th{background:#e8e8e8;padding:4px 8px;text-align:left;font-size:10px;}
+      td{padding:3px 8px;border-bottom:1px solid #e0e0e0;font-size:10px;}
+      tr:nth-child(even) td{background:#f5f5f5;}
+    </style>
+  </head><body>
+    <h1>კადასტრული აზომვების ანგარიში</h1>
+    <div class="meta">
+      გენ.: ${now} &nbsp;·&nbsp;
+      ${escHtml(window.currentUser?.displayName || "")} &nbsp;·&nbsp;
+      ზონა: ${escHtml(zone)} &nbsp;·&nbsp; სექტ.: ${escHtml(sector)} &nbsp;·&nbsp;
+      პერიოდი: ${from} — ${to}
+    </div>
+    <div class="summary">
+      <div class="sum-box"><div class="sum-val">${tableData.length}</div><div class="sum-lbl">სულ ჩანაწერი</div></div>
+      <div class="sum-box"><div class="sum-val">${Object.keys(zoneSums).length}</div><div class="sum-lbl">ზონა</div></div>
+      <div class="sum-box"><div class="sum-val">${Object.keys(typeSums).length}</div><div class="sum-lbl">ტიპი</div></div>
+    </div>
+    <h2>ზონების მიხედვით (Top 15)</h2>
+    <table><thead><tr><th>ზონა</th><th>რაოდენობა</th></tr></thead><tbody>${zoneRows}</tbody></table>
+    <h2>ტიპების მიხედვით</h2>
+    <table><thead><tr><th>ტიპი</th><th>რაოდენობა</th></tr></thead><tbody>${typeRows}</tbody></table>
+    <h2>დეტალური ჩამონათვალი (პირველი 500)</h2>
+    <table><thead><tr><th>TAG</th><th>CADCODE</th><th>DATE_</th><th>ZONE</th><th>SECTOR</th><th>ტიპი</th></tr></thead>
+    <tbody>${dataRows}</tbody></table>
+    <script>window.print();<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
+// =========================
+// ADMIN TOOLS INIT
+// =========================
+
+function initAdminTools() {
+  const AUDIT_USERS = ["Lnukradze", "user1"];
+  if (AUDIT_USERS.includes(window.currentUser?.username)) {
+    const btn = document.getElementById("btn-audit-log");
+    if (btn) btn.style.display = "";
+  }
+  document.getElementById("btn-audit-log")  ?.addEventListener("click", openAuditModal);
+  document.getElementById("btn-progress")   ?.addEventListener("click", openProgressModal);
+  document.getElementById("btn-print-pdf")  ?.addEventListener("click", printReport);
+  document.getElementById("ri-calc-btn")    ?.addEventListener("click", calcRainImpact);
+  document.getElementById("btn-rain-impact")?.addEventListener("click", () => {
+    const from = document.getElementById("f-from").value;
+    const to   = document.getElementById("f-to").value;
+    if (from) document.getElementById("ri-from").value = from;
+    if (to)   document.getElementById("ri-to").value   = to;
+    openModal("modal-rain-impact");
+  });
+}
+
+// =========================
+// WEATHER MODULE
+// =========================
+
+let weatherActive = false;
+let weatherData = {};
+let weatherVar = "temp";
+let weatherPeriod = "now";
+let weatherFetchedAt = 0;
+const WEATHER_CLIENT_TTL = 45 * 60 * 1000;
+
+const WEATHER_VARS = {
+  temp:     { label: "ტემპ.",  unit: "°C",    icon: "🌡" },
+  rain:     { label: "წვიმა",  unit: " mm",   icon: "🌧" },
+  wind:     { label: "ქარი",   unit: " კმ/სთ", icon: "💨" },
+  humidity: { label: "ტენ.",   unit: "%",      icon: "💧" },
+  cloud:    { label: "ღრუბ.", unit: "%",       icon: "☁" },
+  aqi:      { label: "ჰაერი", unit: " AQI",   icon: "🌿" },
+};
+
+const WEATHER_PERIODS = { now: "ახლა", d1: "24სთ", d3: "3 დღე", d7: "7 დღე" };
+
+function computeZoneCentroids() {
+  if (!cachedPreparedGeoJson) return {};
+  const bounds = {};
+
+  cachedPreparedGeoJson.features.forEach((feature) => {
+    const zone = String(feature.properties?.ZONE_ID || "").trim();
+    if (!zone) return;
+    if (!bounds[zone]) {
+      bounds[zone] = { minLat: Infinity, maxLat: -Infinity, minLon: Infinity, maxLon: -Infinity };
+    }
+    const b = bounds[zone];
+    const geom = feature.geometry;
+    if (!geom) return;
+
+    let rings = [];
+    if (geom.type === "Polygon") rings = geom.coordinates;
+    else if (geom.type === "MultiPolygon") rings = geom.coordinates.flat(1);
+
+    rings.forEach((ring) => {
+      ring.forEach(([lon, lat]) => {
+        if (lat < b.minLat) b.minLat = lat;
+        if (lat > b.maxLat) b.maxLat = lat;
+        if (lon < b.minLon) b.minLon = lon;
+        if (lon > b.maxLon) b.maxLon = lon;
+      });
+    });
+  });
+
+  const centroids = {};
+  Object.entries(bounds).forEach(([zone, b]) => {
+    if (b.minLat !== Infinity) {
+      centroids[zone] = { lat: (b.minLat + b.maxLat) / 2, lon: (b.minLon + b.maxLon) / 2 };
+    }
+  });
+  return centroids;
+}
+
+async function loadWeatherData(force = false) {
+  if (!cachedPreparedGeoJson) {
+    setWeatherStatus("მონაცემები ჯერ ჩატვირთული არ არის", "error");
+    return;
+  }
+
+  if (!force && weatherFetchedAt && Date.now() - weatherFetchedAt < WEATHER_CLIENT_TTL && Object.keys(weatherData).length) {
+    applyWeatherStyles();
+    buildWeatherLegend();
+    return;
+  }
+
+  setWeatherStatus("ამინდის მონაცემები იტვირთება...", "loading");
+
+  const centroids = computeZoneCentroids();
+  const zones = Object.entries(centroids).map(([id, c]) => ({ id, lat: +c.lat.toFixed(4), lon: +c.lon.toFixed(4) }));
+
+  if (!zones.length) {
+    setWeatherStatus("ზონების კოორდინატები ვერ მოიძებნა", "error");
+    return;
+  }
+
+  try {
+    const resp = await fetch("/api/weather", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zones, force }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const result = await resp.json();
+    if (!result.ok) throw new Error(result.error || "API შეცდომა");
+
+    weatherData = result.data || {};
+    weatherFetchedAt = Date.now();
+    console.log("[Weather] API response — zones received:", Object.keys(weatherData).length);
+    const sample = Object.entries(weatherData)[0];
+    if (sample) console.log("[Weather] Sample zone", sample[0], ":", sample[1]);
+    setWeatherStatus("", "");
+    applyWeatherStyles();
+    buildWeatherLegend();
+  } catch (err) {
+    setWeatherStatus(`შეცდომა: ${err.message}`, "error");
+  }
+}
+
+function interpolateColor(value, stops) {
+  if (value <= stops[0][0]) return `rgb(${stops[0][1].join(",")})`;
+  if (value >= stops[stops.length - 1][0]) return `rgb(${stops[stops.length - 1][1].join(",")})`;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [v0, c0] = stops[i];
+    const [v1, c1] = stops[i + 1];
+    if (value >= v0 && value <= v1) {
+      const t = (value - v0) / (v1 - v0);
+      return `rgb(${Math.round(c0[0] + t * (c1[0] - c0[0]))},${Math.round(c0[1] + t * (c1[1] - c0[1]))},${Math.round(c0[2] + t * (c1[2] - c0[2]))})`;
+    }
+  }
+  return null;
+}
+
+function getWeatherColor(variable, value) {
+  if (value === null || value === undefined) return null;
+  const scales = {
+    temp: [
+      [-15, [59, 130, 246]], [0, [147, 210, 240]], [10, [134, 239, 172]],
+      [20, [253, 224, 71]], [30, [249, 115, 22]], [42, [185, 28, 28]],
+    ],
+    rain: [
+      [0, [241, 245, 249]], [1, [147, 210, 255]], [5, [59, 130, 246]],
+      [15, [29, 78, 216]], [40, [30, 27, 75]],
+    ],
+    wind: [
+      [0, [134, 239, 172]], [10, [253, 224, 71]], [25, [249, 115, 22]],
+      [45, [220, 38, 38]], [70, [127, 29, 29]],
+    ],
+    humidity: [
+      [0, [253, 224, 71]], [40, [134, 239, 172]], [70, [59, 130, 246]], [100, [29, 78, 216]],
+    ],
+    cloud: [
+      [0, [240, 248, 255]], [30, [209, 213, 219]], [70, [148, 163, 184]], [100, [71, 85, 105]],
+    ],
+    aqi: [
+      [0, [52, 211, 153]], [25, [163, 230, 53]], [50, [253, 224, 71]],
+      [100, [249, 115, 22]], [150, [220, 38, 38]], [250, [127, 29, 29]],
+    ],
+  };
+  return interpolateColor(value, scales[variable] || scales.temp);
+}
+
+function getWeatherValue(zoneData, variable, period) {
+  if (!zoneData) return null;
+  return zoneData[period]?.[variable] ?? null;
+}
+
+function buildWeatherTooltip(zone, zoneData) {
+  const zoneName = ZONE_NAMES_MAP[Number(zone)] || "";
+  const varInfo = WEATHER_VARS[weatherVar];
+  const val = getWeatherValue(zoneData, weatherVar, weatherPeriod);
+  const valStr = val !== null ? `${val}${varInfo.unit}` : "—";
+
+  let nowRows = "";
+  const now = zoneData?.now;
+  if (now) {
+    nowRows = `
+      <div class="zt-row"><span>🌡 ტემპ.:</span><strong>${now.temp ?? "—"}°C</strong></div>
+      <div class="zt-row"><span>🌧 წვიმა:</span><strong>${now.rain ?? "—"} mm</strong></div>
+      <div class="zt-row"><span>💨 ქარი:</span><strong>${now.wind ?? "—"} კმ/სთ</strong></div>
+      <div class="zt-row"><span>💧 ტენ.:</span><strong>${now.humidity ?? "—"}%</strong></div>
+      <div class="zt-row"><span>☁ ღრუბ.:</span><strong>${now.cloud ?? "—"}%</strong></div>
+      ${now.aqi != null ? `<div class="zt-row"><span>🌿 AQI:</span><strong>${now.aqi}</strong></div>` : ""}
+    `;
+  }
+
+  return `<div class="zt-title">ზონა ${zone}${zoneName ? ` — ${zoneName}` : ""}</div>
+    <div class="zt-wx-highlight">${varInfo.icon} ${WEATHER_PERIODS[weatherPeriod]}: <strong>${valStr}</strong></div>
+    <div class="zt-divider"></div>${nowRows}`;
+}
+
+function applyWeatherStyles() {
+  if (!liveZoneGeoJsonLayer || !weatherActive) return;
+
+  console.log(`[Weather] Applying styles — var:${weatherVar} period:${weatherPeriod}`);
+  let painted = 0, missing = 0;
+
+  liveZoneGeoJsonLayer.eachLayer((layer) => {
+    const zone = layer._zone;
+    if (!zone) return;
+    const zoneData = weatherData[zone];
+    const value = getWeatherValue(zoneData, weatherVar, weatherPeriod);
+    const color = getWeatherColor(weatherVar, value);
+
+    if (value === null || value === undefined) {
+      console.warn(`[Weather] Missing weather value for layer: ${weatherVar}, polygon zone: ${zone}`);
+      missing++;
+    } else {
+      painted++;
+    }
+
+    layer.setStyle({
+      fillColor: color || "#e2e8f0",
+      fillOpacity: color ? 0.78 : 0.15,
+      color: "#94a3b8",
+      weight: 0.8,
+    });
+    layer._tipHtml = buildWeatherTooltip(zone, zoneData);
+  });
+
+  console.log(`[Weather] Painted: ${painted}, Missing: ${missing}`);
+}
+
+function buildWeatherLegend() {
+  const bar = document.getElementById("weather-legend-bar");
+  if (!bar) return;
+
+  const varInfo = WEATHER_VARS[weatherVar];
+  const legendCfg = {
+    temp:     { min: -15, max: 42,  grad: "linear-gradient(to right,#3b82f6,#93d2f0,#86efac,#fde047,#f97316,#b91c1c)" },
+    rain:     { min: 0,   max: 40,  grad: "linear-gradient(to right,#f1f5f9,#93d2ff,#3b82f6,#1d4ed8,#1e1b4b)" },
+    wind:     { min: 0,   max: 70,  grad: "linear-gradient(to right,#86efac,#fde047,#f97316,#dc2626,#7f1d1d)" },
+    humidity: { min: 0,   max: 100, grad: "linear-gradient(to right,#fde047,#86efac,#3b82f6,#1d4ed8)" },
+    cloud:    { min: 0,   max: 100, grad: "linear-gradient(to right,#f0f8ff,#d1d5db,#94a3b8,#475569)" },
+    aqi:      { min: 0,   max: 150, grad: "linear-gradient(to right,#34d399,#a3e635,#fde047,#f97316,#dc2626)" },
+  };
+
+  const cfg = legendCfg[weatherVar];
+  const mid = Math.round((cfg.min + cfg.max) / 2);
+
+  bar.innerHTML = `
+    <div class="wl-label-title">${varInfo.icon} ${varInfo.label}</div>
+    <div class="wl-gradient" style="background:${cfg.grad}"></div>
+    <div class="wl-labels">
+      <span>${cfg.min}${varInfo.unit}</span>
+      <span>${mid}${varInfo.unit}</span>
+      <span>${cfg.max}${varInfo.unit}</span>
+    </div>
+  `;
+}
+
+function setWeatherStatus(msg, type) {
+  const el = document.getElementById("weather-status");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `weather-status${type ? ` ws-${type}` : ""}`;
+  el.style.display = msg ? "" : "none";
+}
+
+function activateWeatherMode() {
+  weatherActive = true;
+  document.getElementById("weather-panel")?.style.setProperty("display", "");
+  document.getElementById("btn-weather-layer")?.classList.add("active");
+
+  if (liveZoneMapInstance) {
+    loadWeatherData(false);
+  }
+}
+
+function deactivateWeatherMode() {
+  weatherActive = false;
+  document.getElementById("weather-panel")?.style.setProperty("display", "none");
+  document.getElementById("btn-weather-layer")?.classList.remove("active");
+  if (liveZoneGeoJsonLayer) refreshLiveMapStyles();
+}
+
+function initWeatherModule() {
+  document.getElementById("btn-weather-layer")?.addEventListener("click", () => {
+    if (weatherActive) deactivateWeatherMode();
+    else {
+      // Switch to map view if not already on it
+      const mapView = document.getElementById("live-map-view");
+      if (mapView && mapView.style.display === "none") {
+        document.getElementById("btn-live-map")?.click();
+      }
+      activateWeatherMode();
+    }
+  });
+
+  document.getElementById("btn-weather-close")?.addEventListener("click", deactivateWeatherMode);
+
+  document.getElementById("btn-weather-refresh")?.addEventListener("click", () => loadWeatherData(true));
+
+  document.querySelectorAll(".wp-var").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      document.querySelectorAll(".wp-var").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      weatherVar = btn.dataset.var;
+      if (weatherActive) { applyWeatherStyles(); buildWeatherLegend(); }
+    });
+  });
+
+  document.querySelectorAll(".wp-period").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".wp-period").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      weatherPeriod = btn.dataset.period;
+
+      const humBtn = document.querySelector('.wp-var[data-var="humidity"]');
+      const aqiBtn = document.querySelector('.wp-var[data-var="aqi"]');
+      const notNow = weatherPeriod !== "now";
+      if (humBtn) humBtn.disabled = notNow;
+      if (aqiBtn) aqiBtn.disabled = notNow;
+      if (notNow && (weatherVar === "humidity" || weatherVar === "aqi")) {
+        document.querySelector('.wp-var[data-var="temp"]')?.click();
+      }
+
+      if (weatherActive) applyWeatherStyles();
+    });
+  });
 }
