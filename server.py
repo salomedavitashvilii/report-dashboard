@@ -724,7 +724,6 @@ def api_weather():
         to_fetch.append(z)
 
     def _f(v):
-        """Convert wttr.in string values to float, return None on failure."""
         try:
             return float(v) if v is not None else None
         except (ValueError, TypeError):
@@ -735,74 +734,118 @@ def api_weather():
         lat = z.get("lat")
         lon = z.get("lon")
         try:
-            # --- Weather: wttr.in (free, no key, no strict rate limit) ---
             cur_wx = {}
+            daily_wx = {}
             forecast_days = []
-            try:
-                wx_url = f"https://wttr.in/{lat},{lon}?format=j1"
-                wx_resp = requests.get(wx_url, timeout=15,
-                                       headers={"User-Agent": "WFS-Dashboard/1.0"})
-                if wx_resp.ok:
-                    wx = wx_resp.json()
-                    cc = wx.get("current_condition", [{}])[0]
-                    cur_wx = {
-                        "temp":     _f(cc.get("temp_C")),
-                        "rain":     _f(cc.get("precipMM")),
-                        "wind":     _f(cc.get("windspeedKmph")),
-                        "humidity": _f(cc.get("humidity")),
-                        "cloud":    _f(cc.get("cloudcover")),
-                    }
-                    forecast_days = wx.get("weather", [])
-                    print(f"[Weather] zone {zid} wttr OK: {cur_wx}")
-                else:
-                    print(f"[Weather] zone {zid} wttr HTTP {wx_resp.status_code}")
-            except Exception as wx_err:
-                print(f"[Weather] zone {zid} wttr error: {wx_err}")
 
-            # --- AQI: Open-Meteo air-quality API (separate service, works fine) ---
+            # PRIMARY: Open-Meteo (fast, daily limit resets each day)
+            try:
+                wx_url = (
+                    f"https://api.open-meteo.com/v1/forecast"
+                    f"?latitude={lat}&longitude={lon}"
+                    f"&current=temperature_2m,precipitation,wind_speed_10m,relative_humidity_2m,cloud_cover"
+                    f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,cloud_cover_mean"
+                    f"&forecast_days=7&timezone=auto"
+                )
+                r = requests.get(wx_url, timeout=6)
+                if r.ok:
+                    wx = r.json()
+                    if not wx.get("error"):
+                        c = wx.get("current", {})
+                        cur_wx = {
+                            "temp":     c.get("temperature_2m"),
+                            "rain":     c.get("precipitation"),
+                            "wind":     c.get("wind_speed_10m") or c.get("windspeed_10m"),
+                            "humidity": c.get("relative_humidity_2m") or c.get("relativehumidity_2m"),
+                            "cloud":    c.get("cloud_cover") or c.get("cloudcover"),
+                        }
+                        daily_wx = wx.get("daily", {})
+                        print(f"[Weather] zone {zid} open-meteo OK: temp={cur_wx.get('temp')}")
+                    else:
+                        print(f"[Weather] zone {zid} open-meteo error: {wx.get('reason')}")
+                else:
+                    print(f"[Weather] zone {zid} open-meteo HTTP {r.status_code}")
+            except Exception as e:
+                print(f"[Weather] zone {zid} open-meteo failed: {e}")
+
+            # FALLBACK: wttr.in (if Open-Meteo unavailable)
+            if not any(v is not None for v in cur_wx.values()):
+                try:
+                    r2 = requests.get(
+                        f"https://wttr.in/{lat},{lon}?format=j1",
+                        timeout=6, headers={"User-Agent": "WFS-Dashboard/1.0"})
+                    if r2.ok:
+                        cc = r2.json().get("current_condition", [{}])[0]
+                        cur_wx = {
+                            "temp":     _f(cc.get("temp_C")),
+                            "rain":     _f(cc.get("precipMM")),
+                            "wind":     _f(cc.get("windspeedKmph")),
+                            "humidity": _f(cc.get("humidity")),
+                            "cloud":    _f(cc.get("cloudcover")),
+                        }
+                        forecast_days = r2.json().get("weather", [])
+                        print(f"[Weather] zone {zid} wttr fallback OK")
+                except Exception as e2:
+                    print(f"[Weather] zone {zid} wttr fallback failed: {e2}")
+
+            # AQI: separate API, always independent
             aqi_val = None
             try:
-                aqi_url = (
+                r3 = requests.get(
                     f"https://air-quality-api.open-meteo.com/v1/air-quality"
-                    f"?latitude={lat}&longitude={lon}&current=european_aqi&timezone=auto"
-                )
-                aqi_resp = requests.get(aqi_url, timeout=15)
-                if aqi_resp.ok:
-                    aqi_data = aqi_resp.json()
-                    if not aqi_data.get("error"):
-                        aqi_val = aqi_data.get("current", {}).get("european_aqi")
-            except Exception as aqi_err:
-                print(f"[Weather] zone {zid} AQI error: {aqi_err}")
+                    f"?latitude={lat}&longitude={lon}&current=european_aqi&timezone=auto",
+                    timeout=6)
+                if r3.ok:
+                    d = r3.json()
+                    if not d.get("error"):
+                        aqi_val = d.get("current", {}).get("european_aqi")
+            except Exception as e3:
+                print(f"[Weather] zone {zid} AQI failed: {e3}")
 
-            def _day(days):
-                """Aggregate wttr.in forecast days into one summary dict."""
+            # Build daily summaries
+            def avg(lst):
+                v = [x for x in (lst or []) if x is not None]
+                return round(sum(v) / len(v), 1) if v else None
+            def rsum(lst):
+                v = [x for x in (lst or []) if x is not None]
+                return round(sum(v), 1) if v else None
+            def rmax(lst):
+                v = [x for x in (lst or []) if x is not None]
+                return max(v) if v else None
+
+            def om_day(n):
+                if daily_wx:
+                    mx = daily_wx.get("temperature_2m_max", [])[:n]
+                    mn = daily_wx.get("temperature_2m_min", [])[:n]
+                    wind_key = "wind_speed_10m_max" if "wind_speed_10m_max" in daily_wx else "windspeed_10m_max"
+                    cloud_key = "cloud_cover_mean" if "cloud_cover_mean" in daily_wx else "cloudcover_mean"
+                    return {
+                        "temp":     avg(mx + mn),
+                        "rain":     rsum(daily_wx.get("precipitation_sum", [])[:n]),
+                        "wind":     rmax(daily_wx.get(wind_key, [])[:n]),
+                        "humidity": None,
+                        "cloud":    avg(daily_wx.get(cloud_key, [])[:n]),
+                        "aqi":      None,
+                    }
+                # wttr.in fallback days
                 temps, winds, clouds, rains = [], [], [], []
-                for d in days:
-                    mx = _f(d.get("maxtempC"))
-                    mn = _f(d.get("mintempC"))
-                    if mx is not None: temps.append(mx)
-                    if mn is not None: temps.append(mn)
+                for d in forecast_days[:n]:
+                    mx, mn = _f(d.get("maxtempC")), _f(d.get("mintempC"))
+                    if mx: temps.append(mx)
+                    if mn: temps.append(mn)
                     for h in d.get("hourly", []):
-                        w = _f(h.get("windspeedKmph"))
-                        c = _f(h.get("cloudcover"))
-                        p = _f(h.get("precipMM"))
-                        if w is not None: winds.append(w)
-                        if c is not None: clouds.append(c)
-                        if p is not None: rains.append(p)
-                def avg(lst): return round(sum(lst)/len(lst), 1) if lst else None
-                def rmax(lst): return max(lst) if lst else None
-                def rsum(lst): return round(sum(lst), 1) if lst else None
-                return {
-                    "temp": avg(temps), "rain": rsum(rains),
-                    "wind": rmax(winds), "humidity": None,
-                    "cloud": avg(clouds), "aqi": None,
-                }
+                        w, c, p = _f(h.get("windspeedKmph")), _f(h.get("cloudcover")), _f(h.get("precipMM"))
+                        if w: winds.append(w)
+                        if c: clouds.append(c)
+                        if p: rains.append(p)
+                return {"temp": avg(temps), "rain": rsum(rains), "wind": rmax(winds),
+                        "humidity": None, "cloud": avg(clouds), "aqi": None}
 
             val = {
                 "now": {**cur_wx, "aqi": aqi_val},
-                "d1":  _day(forecast_days[:1]),
-                "d3":  _day(forecast_days[:3]),
-                "d7":  _day(forecast_days[:3]),  # wttr.in max 3 days
+                "d1":  om_day(1),
+                "d3":  om_day(3),
+                "d7":  om_day(7),
             }
             WEATHER_CACHE[f"wx_{zid}"] = (time.time(), val)
             return zid, val
