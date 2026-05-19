@@ -854,7 +854,7 @@ def api_weather():
             return zid, None
 
     if to_fetch:
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=10) as ex:
             for zid, val in ex.map(fetch_one, to_fetch):
                 if val:
                     results[zid] = val

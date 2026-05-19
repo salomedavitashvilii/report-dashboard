@@ -3131,7 +3131,16 @@ async function loadWeatherData(force = false) {
   setWeatherStatus("ამინდის მონაცემები იტვირთება...", "loading");
 
   const centroids = computeZoneCentroids();
-  const zones = Object.entries(centroids).map(([id, c]) => ({ id, lat: +c.lat.toFixed(4), lon: +c.lon.toFixed(4) }));
+
+  // Active zones from loaded data get priority; cap at 25 to fit Render's 30s timeout
+  const MAX_ZONES = 25;
+  const activeZones = new Set(tableData.map(r => String(r.ZONE || "").trim()).filter(Boolean));
+  const sorted = Object.entries(centroids).sort(([a], [b]) => {
+    return (activeZones.has(a) ? 0 : 1) - (activeZones.has(b) ? 0 : 1);
+  });
+  const zones = sorted
+    .slice(0, MAX_ZONES)
+    .map(([id, c]) => ({ id, lat: +c.lat.toFixed(4), lon: +c.lon.toFixed(4) }));
 
   if (!zones.length) {
     setWeatherStatus("ზონების კოორდინატები ვერ მოიძებნა", "error");
