@@ -2785,16 +2785,21 @@ function openNaxaziModal(geomText) {
   overlay.classList.add("open");
   setTimeout(() => {
     if (naxaziMapInstance) { naxaziMapInstance.remove(); naxaziMapInstance = null; }
-    naxaziMapInstance = L.map("naxazi-map", { zoomControl: true });
-    L.tileLayer(TILE_URLS.light, { maxZoom: 20 }).addTo(naxaziMapInstance);
+    naxaziMapInstance = L.map("naxazi-map", { zoomControl: true, attributionControl: false }).setView([41.72, 44.78], 9);
+    L.tileLayer("https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", { maxZoom: 20 }).addTo(naxaziMapInstance);
     try {
-      const gj = JSON.parse(geomText);
-      const layer = L.geoJSON(gj, { style: { color: "#2563eb", weight: 2, fillOpacity: 0.3 } }).addTo(naxaziMapInstance);
-      if (layer.getBounds().isValid()) naxaziMapInstance.fitBounds(layer.getBounds(), { padding: [20, 20] });
-      else naxaziMapInstance.setView([41.72, 44.78], 10);
-    } catch (e) {
-      naxaziMapInstance.setView([41.72, 44.78], 10);
-    }
+      const g = JSON.parse(geomText.replace(/^"|"$/g, "").replace(/\\"/g, '"'));
+      if (g) {
+        const layer = L.geoJSON(
+          { ...g, coordinates: reprojectCoordinates(g.coordinates) },
+          {
+            style: () => ({ color: "#ff7800", weight: 3 }),
+            pointToLayer: (_f, ll) => L.circleMarker(ll, { radius: 6, fillColor: "#ff7800", color: "#000" }),
+          }
+        ).addTo(naxaziMapInstance);
+        if (layer.getBounds().isValid()) naxaziMapInstance.fitBounds(layer.getBounds());
+      }
+    } catch (e) {}
     naxaziMapInstance.invalidateSize();
   }, 100);
 }
