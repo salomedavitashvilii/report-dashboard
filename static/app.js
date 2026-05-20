@@ -3064,6 +3064,8 @@ function initAdminTools() {
 let weatherActive = false;
 let weatherData = {};
 let weatherCentroids = {};
+let weatherPollingTimer = null;
+let weatherTotalZones = 0;
 let weatherVar = "temp";
 let weatherPeriod = "now";
 let weatherFetchedAt = 0;
@@ -3117,49 +3119,11 @@ function computeZoneCentroids() {
   return centroids;
 }
 
-function findNearestLoadedZone(zoneId) {
-  const loadedIds = Object.keys(weatherData);
-  if (!loadedIds.length || !weatherCentroids[zoneId]) return null;
-  const { lat: lat0, lon: lon0 } = weatherCentroids[zoneId];
-  let bestId = null, bestDist = Infinity;
-  for (const lid of loadedIds) {
-    const c = weatherCentroids[lid];
-    if (!c) continue;
-    const dist = (c.lat - lat0) ** 2 + (c.lon - lon0) ** 2;
-    if (dist < bestDist) { bestDist = dist; bestId = lid; }
-  }
-  return bestId;
-}
-
-function computeGeorgiaAverage() {
-  const vals = Object.values(weatherData);
-  if (!vals.length) return null;
-  const avg = (arr) => {
-    const nums = arr.filter((v) => v !== null && v !== undefined);
-    return nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10 : null;
-  };
-  const pv = (period, key) => vals.map((v) => v?.[period]?.[key] ?? null);
-  const makeP = (p) => ({
-    temp: avg(pv(p, "temp")), rain: avg(pv(p, "rain")),
-    wind: avg(pv(p, "wind")), humidity: p === "now" ? avg(pv(p, "humidity")) : null,
-    cloud: avg(pv(p, "cloud")), aqi: p === "now" ? avg(pv(p, "aqi")) : null,
-  });
-  return { now: makeP("now"), d1: makeP("d1"), d3: makeP("d3"), d7: makeP("d7") };
-}
-
 async function loadWeatherData(force = false) {
   if (!cachedPreparedGeoJson) {
     setWeatherStatus("მონაცემები ჯერ ჩატვირთული არ არის", "error");
     return;
   }
-
-  if (!force && weatherFetchedAt && Date.now() - weatherFetchedAt < WEATHER_CLIENT_TTL && Object.keys(weatherData).length) {
-    applyWeatherStyles();
-    buildWeatherLegend();
-    return;
-  }
-
-  setWeatherStatus("ამინდის მონაცემები იტვირთება...", "loading");
 
   weatherCentroids = computeZoneCentroids();
   const zones = Object.entries(weatherCentroids).map(([id, c]) => ({
@@ -3173,8 +3137,25 @@ async function loadWeatherData(force = false) {
     return;
   }
 
+  weatherTotalZones = zones.length;
+
+  // If all zones already loaded client-side and cache is fresh, just repaint
+  if (!force && weatherFetchedAt && Date.now() - weatherFetchedAt < WEATHER_CLIENT_TTL
+      && Object.keys(weatherData).length >= weatherTotalZones) {
+    applyWeatherStyles();
+    buildWeatherLegend();
+    return;
+  }
+
+  if (!force) {
+    weatherData = {};
+  }
+  setWeatherStatus(`იტვირთება 0/${zones.length} ზონა`, "loading");
+  applyWeatherStyles();
+  buildWeatherLegend();
+
   try {
-    const resp = await fetch("/api/weather-zones", {
+    const resp = await fetch("/api/weather-start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ zones, force }),
@@ -3183,16 +3164,84 @@ async function loadWeatherData(force = false) {
     const result = await resp.json();
     if (!result.ok) throw new Error(result.error || "API შეცდომა");
 
-    weatherData = result.data || {};
-    weatherFetchedAt = Date.now();
-    const s = result.stats || {};
-    console.log(`[Weather] API — requested:${s.requested} cached:${s.cached} fetched:${s.fetched} loaded:${s.loaded} interpolated:${s.interpolated} returned:${s.returned}`);
-    setWeatherStatus("", "");
-    applyWeatherStyles();
-    buildWeatherLegend();
+    if (result.finished) {
+      await pollWeatherOnce(zones);
+      return;
+    }
+
+    stopWeatherPolling();
+    startWeatherPolling(zones);
   } catch (err) {
     setWeatherStatus(`შეცდომა: ${err.message}`, "error");
   }
+}
+
+function stopWeatherPolling() {
+  if (weatherPollingTimer) {
+    clearInterval(weatherPollingTimer);
+    weatherPollingTimer = null;
+  }
+}
+
+async function pollWeatherOnce(zones) {
+  try {
+    const resp = await fetch("/api/weather-zones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zones }),
+    });
+    if (!resp.ok) return;
+    const result = await resp.json();
+    if (result.ok) {
+      weatherData = result.data || {};
+      weatherFetchedAt = Date.now();
+      setWeatherStatus("", "");
+      applyWeatherStyles();
+      buildWeatherLegend();
+    }
+  } catch (e) {
+    console.warn("[Weather] pollWeatherOnce error:", e);
+  }
+}
+
+function startWeatherPolling(zones) {
+  weatherPollingTimer = setInterval(async () => {
+    try {
+      const [progResp, dataResp] = await Promise.all([
+        fetch("/api/weather-progress"),
+        fetch("/api/weather-zones", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zones }),
+        }),
+      ]);
+
+      if (progResp.ok) {
+        const prog = await progResp.json();
+        if (prog.ok) {
+          setWeatherStatus(`იტვირთება ${prog.done}/${prog.total} ზონა`, "loading");
+          if (!prog.running) {
+            stopWeatherPolling();
+            const failNote = prog.failed > 0 ? ` (${prog.failed} ვერ ჩაიტვირთა)` : "";
+            setWeatherStatus(failNote ? failNote : "", failNote ? "error" : "");
+            weatherFetchedAt = Date.now();
+            console.log(`[Weather] Complete — done:${prog.done} failed:${prog.failed}`);
+          }
+        }
+      }
+
+      if (dataResp.ok) {
+        const dataResult = await dataResp.json();
+        if (dataResult.ok) {
+          weatherData = dataResult.data || {};
+          applyWeatherStyles();
+          buildWeatherLegend();
+        }
+      }
+    } catch (e) {
+      console.warn("[Weather] Polling error:", e);
+    }
+  }, 2500);
 }
 
 function interpolateColor(value, stops) {
@@ -3243,16 +3292,11 @@ function getWeatherValue(zoneData, variable, period) {
   return zoneData[period]?.[variable] ?? null;
 }
 
-function buildWeatherTooltip(zone, zoneData, source = "direct") {
+function buildWeatherTooltip(zone, zoneData) {
   const zoneName = ZONE_NAMES_MAP[Number(zone)] || "";
   const varInfo = WEATHER_VARS[weatherVar];
   const val = getWeatherValue(zoneData, weatherVar, weatherPeriod);
   const valStr = val !== null ? `${val}${varInfo.unit}` : "—";
-  const sourceNote = source === "nearest"
-    ? `<div class="zt-source">~ მეზობელი ზონის მონაცემი</div>`
-    : source === "average"
-    ? `<div class="zt-source">~ საქართველოს საშუალო</div>`
-    : "";
 
   let nowRows = "";
   const now = zoneData?.now;
@@ -3268,7 +3312,6 @@ function buildWeatherTooltip(zone, zoneData, source = "direct") {
   }
 
   return `<div class="zt-title">ზონა ${zone}${zoneName ? ` — ${zoneName}` : ""}</div>
-    ${sourceNote}
     <div class="zt-wx-highlight">${varInfo.icon} ${WEATHER_PERIODS[weatherPeriod]}: <strong>${valStr}</strong></div>
     <div class="zt-divider"></div>${nowRows}`;
 }
@@ -3276,58 +3319,42 @@ function buildWeatherTooltip(zone, zoneData, source = "direct") {
 function applyWeatherStyles() {
   if (!liveZoneGeoJsonLayer || !weatherActive) return;
 
-  const georgiaAvg = computeGeorgiaAverage();
-  const loadedZoneIds = Object.keys(weatherData);
-  const allCentroidIds = Object.keys(weatherCentroids);
-  let totalPolygons = 0, directCount = 0, nearestCount = 0, avgCount = 0, missing = 0;
-  const fallbackZones = new Set();
+  const loadedCount = Object.keys(weatherData).length;
+  const totalZones = Object.keys(weatherCentroids).length;
+  let totalPolygons = 0, painted = 0, pending = 0;
 
   liveZoneGeoJsonLayer.eachLayer((layer) => {
     totalPolygons++;
     const zone = layer._zone;
-    if (!zone) { missing++; return; }
+    if (!zone) { pending++; return; }
 
-    let zoneData = weatherData[zone];
-    let source = "direct";
+    const zoneData = weatherData[zone];
 
-    if (!zoneData) {
-      const nearestId = findNearestLoadedZone(zone);
-      if (nearestId) {
-        zoneData = weatherData[nearestId];
-        source = "nearest";
-        fallbackZones.add(zone);
-        nearestCount++;
-      } else if (georgiaAvg) {
-        zoneData = georgiaAvg;
-        source = "average";
-        fallbackZones.add(zone);
-        avgCount++;
-      }
+    if (zoneData) {
+      const value = getWeatherValue(zoneData, weatherVar, weatherPeriod);
+      const color = getWeatherColor(weatherVar, value);
+      layer.setStyle({
+        fillColor: color || "#e2e8f0",
+        fillOpacity: color ? 0.78 : 0.15,
+        color: "#94a3b8",
+        weight: 0.8,
+      });
+      layer._tipHtml = buildWeatherTooltip(zone, zoneData);
+      painted++;
     } else {
-      directCount++;
+      layer.setStyle({
+        fillColor: "#94a3b8",
+        fillOpacity: 0.1,
+        color: "#94a3b8",
+        weight: 0.5,
+      });
+      layer._tipHtml = `<div class="zt-title">ზონა ${zone}</div><div class="zt-source">⏳ იტვირთება...</div>`;
+      pending++;
     }
-
-    const value = getWeatherValue(zoneData, weatherVar, weatherPeriod);
-    const color = getWeatherColor(weatherVar, value);
-
-    if (value === null || value === undefined) {
-      missing++;
-    }
-
-    layer.setStyle({
-      fillColor: color || "#e2e8f0",
-      fillOpacity: color ? 0.78 : 0.15,
-      color: "#94a3b8",
-      weight: 0.8,
-    });
-    layer._tipHtml = buildWeatherTooltip(zone, zoneData, source);
   });
 
-  const painted = directCount + nearestCount + avgCount;
   console.log(
-    `[Weather] Total polygons: ${totalPolygons} | Total zones: ${allCentroidIds.length} | ` +
-    `Loaded weather zones: ${loadedZoneIds.length} | Fallback zones: ${fallbackZones.size} | ` +
-    `Painted: ${painted} | Missing: ${missing}`
+    `[Weather] polygons:${totalPolygons} | zones:${totalZones} | loaded:${loadedCount} | Painted:${painted} | Pending:${pending}`
   );
 }
 
@@ -3379,6 +3406,7 @@ function activateWeatherMode() {
 
 function deactivateWeatherMode() {
   weatherActive = false;
+  stopWeatherPolling();
   document.getElementById("weather-panel")?.style.setProperty("display", "none");
   document.getElementById("btn-weather-layer")?.classList.remove("active");
   if (liveZoneGeoJsonLayer) refreshLiveMapStyles();

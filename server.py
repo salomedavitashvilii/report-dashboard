@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import json
-import math
 import time
 import sqlite3
 import urllib.parse
@@ -32,6 +31,14 @@ CACHE_TTL = 300  # 5 წუთი
 
 WEATHER_CACHE = {}
 WEATHER_CACHE_TTL = 3600  # 1 საათი
+
+WEATHER_LOADING = {
+    "running": False,
+    "started_at": 0.0,
+    "total": 0,
+    "done": 0,
+    "failed": 0,
+}
 
 
 def get_cached_data(cache_key):
@@ -695,9 +702,10 @@ def rain_impact():
 # WEATHER API
 # =========================
 
-@app.route("/api/weather-zones", methods=["POST"])
+@app.route("/api/weather-start", methods=["POST"])
 @login_required
-def api_weather_zones():
+def api_weather_start():
+    import threading
     from concurrent.futures import ThreadPoolExecutor
 
     req_data = request.get_json() or {}
@@ -707,9 +715,18 @@ def api_weather_zones():
     if not zones:
         return jsonify({"ok": False, "error": "no zones provided"}), 400
 
-    results = {}
-    to_fetch = []
+    # If already running and not stale, just join the existing run
+    stale = time.time() - WEATHER_LOADING["started_at"] > 600
+    if WEATHER_LOADING["running"] and not force and not stale:
+        return jsonify({
+            "ok": True,
+            "already_running": True,
+            "total": WEATHER_LOADING["total"],
+            "done": WEATHER_LOADING["done"],
+        })
 
+    to_fetch = []
+    cached_count = 0
     for z in zones:
         zid = str(z.get("id", "")).strip()
         if not zid:
@@ -717,11 +734,25 @@ def api_weather_zones():
         if not force:
             cached = WEATHER_CACHE.get(f"wx_{zid}")
             if cached:
-                ts, val = cached
+                ts, _ = cached
                 if time.time() - ts < WEATHER_CACHE_TTL:
-                    results[zid] = val
+                    cached_count += 1
                     continue
         to_fetch.append(z)
+
+    total = cached_count + len(to_fetch)
+
+    if not to_fetch:
+        WEATHER_LOADING.update({
+            "running": False, "started_at": time.time(),
+            "total": total, "done": total, "failed": 0,
+        })
+        return jsonify({"ok": True, "total": total, "done": total, "finished": True})
+
+    WEATHER_LOADING.update({
+        "running": True, "started_at": time.time(),
+        "total": total, "done": cached_count, "failed": 0,
+    })
 
     def _f(v):
         try:
@@ -787,23 +818,6 @@ def api_weather_zones():
             if any(v is not None for v in cur_wx.values()):
                 break
 
-        if not any(v is not None for v in cur_wx.values()):
-            print(f"[Weather] zone {zid} — both attempts failed")
-            return zid, None
-
-        aqi_val = None
-        try:
-            r3 = requests.get(
-                f"https://air-quality-api.open-meteo.com/v1/air-quality"
-                f"?latitude={lat}&longitude={lon}&current=european_aqi&timezone=auto",
-                timeout=9)
-            if r3.ok:
-                d3j = r3.json()
-                if not d3j.get("error"):
-                    aqi_val = d3j.get("current", {}).get("european_aqi")
-        except Exception:
-            pass
-
         def avg(lst):
             v = [x for x in (lst or []) if x is not None]
             return round(sum(v) / len(v), 1) if v else None
@@ -850,62 +864,85 @@ def api_weather_zones():
             return {"temp": avg(temps), "rain": rsum(rains), "wind": rmax(winds),
                     "humidity": None, "cloud": avg(clouds), "aqi": None}
 
-        val = {
-            "now": {**cur_wx, "aqi": aqi_val},
-            "d1":  om_day(1),
-            "d3":  om_day(3),
-            "d7":  om_day(7),
-        }
-        WEATHER_CACHE[f"wx_{zid}"] = (time.time(), val)
-        return zid, val
+        aqi_val = None
+        try:
+            r3 = requests.get(
+                f"https://air-quality-api.open-meteo.com/v1/air-quality"
+                f"?latitude={lat}&longitude={lon}&current=european_aqi&timezone=auto",
+                timeout=9)
+            if r3.ok:
+                d3j = r3.json()
+                if not d3j.get("error"):
+                    aqi_val = d3j.get("current", {}).get("european_aqi")
+        except Exception:
+            pass
 
-    # Limit fresh fetches to avoid Render's 30s timeout; remaining get nearest-zone fallback
-    MAX_FETCH = 15
-    fetch_now = to_fetch[:MAX_FETCH]
+        if any(v is not None for v in cur_wx.values()):
+            val = {
+                "now": {**cur_wx, "aqi": aqi_val},
+                "d1":  om_day(1),
+                "d3":  om_day(3),
+                "d7":  om_day(7),
+            }
+            WEATHER_CACHE[f"wx_{zid}"] = (time.time(), val)
+        else:
+            print(f"[Weather] zone {zid} — both attempts failed")
+            WEATHER_LOADING["failed"] += 1
 
-    if fetch_now:
-        with ThreadPoolExecutor(max_workers=5) as ex:
-            for zid, val in ex.map(fetch_one, fetch_now):
-                if val:
-                    results[zid] = val
+        WEATHER_LOADING["done"] += 1
 
-    # Build coordinate index for nearest-zone interpolation
-    zone_coords = {str(z.get("id", "")): (z.get("lat", 0), z.get("lon", 0)) for z in zones}
-    loaded_ids = list(results.keys())
-    interpolated = []
+    def background_fetch():
+        try:
+            with ThreadPoolExecutor(max_workers=5) as ex:
+                list(ex.map(fetch_one, to_fetch))
+        except Exception as e:
+            print(f"[Weather] background_fetch error: {e}")
+        finally:
+            WEATHER_LOADING["running"] = False
+            print(f"[Weather] Done — total:{WEATHER_LOADING['total']} "
+                  f"done:{WEATHER_LOADING['done']} failed:{WEATHER_LOADING['failed']}")
 
-    if loaded_ids:
-        for z in zones:
-            zid = str(z.get("id", "")).strip()
-            if not zid or zid in results:
-                continue
-            lat0, lon0 = zone_coords.get(zid, (0, 0))
-            nearest_id = min(
-                loaded_ids,
-                key=lambda lid: math.sqrt(
-                    (zone_coords.get(lid, (0, 0))[0] - lat0) ** 2 +
-                    (zone_coords.get(lid, (0, 0))[1] - lon0) ** 2
-                )
-            )
-            results[zid] = results[nearest_id]
-            interpolated.append(zid)
-
-    cache_hits = len(zones) - len(to_fetch)
-    print(f"[Weather] zones={len(zones)} cache={cache_hits} fetched={len(fetch_now)} "
-          f"loaded={len(loaded_ids)} interpolated={len(interpolated)} returned={len(results)}")
+    threading.Thread(target=background_fetch, daemon=True).start()
 
     return jsonify({
         "ok": True,
-        "data": results,
-        "stats": {
-            "requested": len(zones),
-            "returned": len(results),
-            "cached": cache_hits,
-            "fetched": len(fetch_now),
-            "loaded": len(loaded_ids),
-            "interpolated": len(interpolated),
-        }
+        "started": True,
+        "total": total,
+        "done": cached_count,
     })
+
+
+@app.route("/api/weather-progress")
+@login_required
+def api_weather_progress():
+    return jsonify({
+        "ok": True,
+        "running": WEATHER_LOADING["running"],
+        "total": WEATHER_LOADING["total"],
+        "done": WEATHER_LOADING["done"],
+        "failed": WEATHER_LOADING["failed"],
+        "finished": not WEATHER_LOADING["running"] and WEATHER_LOADING["started_at"] > 0,
+    })
+
+
+@app.route("/api/weather-zones", methods=["POST"])
+@login_required
+def api_weather_zones():
+    req_data = request.get_json() or {}
+    zones = req_data.get("zones", [])
+
+    results = {}
+    for z in zones:
+        zid = str(z.get("id", "")).strip()
+        if not zid:
+            continue
+        cached = WEATHER_CACHE.get(f"wx_{zid}")
+        if cached:
+            ts, val = cached
+            if time.time() - ts < WEATHER_CACHE_TTL:
+                results[zid] = val
+
+    return jsonify({"ok": True, "data": results, "count": len(results)})
 
 
 # =========================
