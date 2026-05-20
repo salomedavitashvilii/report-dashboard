@@ -1507,9 +1507,9 @@ function renderLiveZoneMap() {
       setTimeout(() => {
         liveZoneMapInstance.invalidateSize();
         const b = liveZoneGeoJsonLayer?.getBounds();
-        if (b?.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [20, 20] });
+        if (b?.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [30, 30] });
         showMapLoading(false);
-      }, 250);
+      }, 400);
     })
     .catch((err) => {
       console.error("GeoJSON loading error:", err);
@@ -2131,16 +2131,18 @@ function renderTable() {
 
     drawBtn.addEventListener("click", () => {
       const exp = document.getElementById(expId);
-      const isOpen = exp.style.display === "table-row";
+      const isOpen = exp.dataset.open === "1";
       drawBtn.classList.toggle("active", !isOpen);
 
       if (isOpen) {
+        exp.dataset.open = "";
         exp.style.display = "none";
         if (activeMaps[mapId]) { activeMaps[mapId].remove(); delete activeMaps[mapId]; }
       } else {
-        exp.style.display = "table-row";
+        exp.dataset.open = "1";
+        exp.style.display = window.matchMedia("(max-width: 768px)").matches ? "block" : "table-row";
         initMiniMap(i, geomText);
-        setTimeout(() => { if (activeMaps[mapId]) activeMaps[mapId].invalidateSize(); }, 150);
+        setTimeout(() => { if (activeMaps[mapId]) activeMaps[mapId].invalidateSize(); }, 200);
       }
     });
 
