@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import math
 import time
 import sqlite3
 import urllib.parse
@@ -30,7 +31,7 @@ CACHE = {}
 CACHE_TTL = 300  # 5 წუთი
 
 WEATHER_CACHE = {}
-WEATHER_CACHE_TTL = 2700  # 45 წუთი
+WEATHER_CACHE_TTL = 3600  # 1 საათი
 
 
 def get_cached_data(cache_key):
@@ -694,14 +695,14 @@ def rain_impact():
 # WEATHER API
 # =========================
 
-@app.route("/api/weather", methods=["POST"])
+@app.route("/api/weather-zones", methods=["POST"])
 @login_required
-def api_weather():
+def api_weather_zones():
     from concurrent.futures import ThreadPoolExecutor
 
-    data = request.get_json() or {}
-    zones = data.get("zones", [])
-    force = bool(data.get("force", False))
+    req_data = request.get_json() or {}
+    zones = req_data.get("zones", [])
+    force = bool(req_data.get("force", False))
 
     if not zones:
         return jsonify({"ok": False, "error": "no zones provided"}), 400
@@ -713,9 +714,8 @@ def api_weather():
         zid = str(z.get("id", "")).strip()
         if not zid:
             continue
-        cache_key = f"wx_{zid}"
         if not force:
-            cached = WEATHER_CACHE.get(cache_key)
+            cached = WEATHER_CACHE.get(f"wx_{zid}")
             if cached:
                 ts, val = cached
                 if time.time() - ts < WEATHER_CACHE_TTL:
@@ -731,14 +731,17 @@ def api_weather():
 
     def fetch_one(z):
         zid = str(z.get("id", "")).strip()
-        lat = z.get("lat")
-        lon = z.get("lon")
-        try:
+        lat, lon = z.get("lat"), z.get("lon")
+
+        cur_wx = {}
+        daily_wx = {}
+        forecast_days = []
+
+        for _ in range(2):
             cur_wx = {}
             daily_wx = {}
             forecast_days = []
 
-            # PRIMARY: Open-Meteo (fast, daily limit resets each day)
             try:
                 wx_url = (
                     f"https://api.open-meteo.com/v1/forecast"
@@ -747,7 +750,7 @@ def api_weather():
                     f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,cloud_cover_mean"
                     f"&forecast_days=7&timezone=auto"
                 )
-                r = requests.get(wx_url, timeout=6)
+                r = requests.get(wx_url, timeout=9)
                 if r.ok:
                     wx = r.json()
                     if not wx.get("error"):
@@ -760,20 +763,14 @@ def api_weather():
                             "cloud":    c.get("cloud_cover") or c.get("cloudcover"),
                         }
                         daily_wx = wx.get("daily", {})
-                        print(f"[Weather] zone {zid} open-meteo OK: temp={cur_wx.get('temp')}")
-                    else:
-                        print(f"[Weather] zone {zid} open-meteo error: {wx.get('reason')}")
-                else:
-                    print(f"[Weather] zone {zid} open-meteo HTTP {r.status_code}")
-            except Exception as e:
-                print(f"[Weather] zone {zid} open-meteo failed: {e}")
+            except Exception:
+                pass
 
-            # FALLBACK: wttr.in (if Open-Meteo unavailable)
             if not any(v is not None for v in cur_wx.values()):
                 try:
                     r2 = requests.get(
                         f"https://wttr.in/{lat},{lon}?format=j1",
-                        timeout=6, headers={"User-Agent": "WFS-Dashboard/1.0"})
+                        timeout=9, headers={"User-Agent": "WFS-Dashboard/1.0"})
                     if r2.ok:
                         cc = r2.json().get("current_condition", [{}])[0]
                         cur_wx = {
@@ -784,82 +781,131 @@ def api_weather():
                             "cloud":    _f(cc.get("cloudcover")),
                         }
                         forecast_days = r2.json().get("weather", [])
-                        print(f"[Weather] zone {zid} wttr fallback OK")
-                except Exception as e2:
-                    print(f"[Weather] zone {zid} wttr fallback failed: {e2}")
+                except Exception:
+                    pass
 
-            # AQI: separate API, always independent
-            aqi_val = None
-            try:
-                r3 = requests.get(
-                    f"https://air-quality-api.open-meteo.com/v1/air-quality"
-                    f"?latitude={lat}&longitude={lon}&current=european_aqi&timezone=auto",
-                    timeout=6)
-                if r3.ok:
-                    d = r3.json()
-                    if not d.get("error"):
-                        aqi_val = d.get("current", {}).get("european_aqi")
-            except Exception as e3:
-                print(f"[Weather] zone {zid} AQI failed: {e3}")
+            if any(v is not None for v in cur_wx.values()):
+                break
 
-            # Build daily summaries
-            def avg(lst):
-                v = [x for x in (lst or []) if x is not None]
-                return round(sum(v) / len(v), 1) if v else None
-            def rsum(lst):
-                v = [x for x in (lst or []) if x is not None]
-                return round(sum(v), 1) if v else None
-            def rmax(lst):
-                v = [x for x in (lst or []) if x is not None]
-                return max(v) if v else None
-
-            def om_day(n):
-                if daily_wx:
-                    mx = daily_wx.get("temperature_2m_max", [])[:n]
-                    mn = daily_wx.get("temperature_2m_min", [])[:n]
-                    wind_key = "wind_speed_10m_max" if "wind_speed_10m_max" in daily_wx else "windspeed_10m_max"
-                    cloud_key = "cloud_cover_mean" if "cloud_cover_mean" in daily_wx else "cloudcover_mean"
-                    return {
-                        "temp":     avg(mx + mn),
-                        "rain":     rsum(daily_wx.get("precipitation_sum", [])[:n]),
-                        "wind":     rmax(daily_wx.get(wind_key, [])[:n]),
-                        "humidity": None,
-                        "cloud":    avg(daily_wx.get(cloud_key, [])[:n]),
-                        "aqi":      None,
-                    }
-                # wttr.in fallback days
-                temps, winds, clouds, rains = [], [], [], []
-                for d in forecast_days[:n]:
-                    mx, mn = _f(d.get("maxtempC")), _f(d.get("mintempC"))
-                    if mx: temps.append(mx)
-                    if mn: temps.append(mn)
-                    for h in d.get("hourly", []):
-                        w, c, p = _f(h.get("windspeedKmph")), _f(h.get("cloudcover")), _f(h.get("precipMM"))
-                        if w: winds.append(w)
-                        if c: clouds.append(c)
-                        if p: rains.append(p)
-                return {"temp": avg(temps), "rain": rsum(rains), "wind": rmax(winds),
-                        "humidity": None, "cloud": avg(clouds), "aqi": None}
-
-            val = {
-                "now": {**cur_wx, "aqi": aqi_val},
-                "d1":  om_day(1),
-                "d3":  om_day(3),
-                "d7":  om_day(7),
-            }
-            WEATHER_CACHE[f"wx_{zid}"] = (time.time(), val)
-            return zid, val
-        except Exception as e:
-            print(f"[Weather] zone {zid} EXCEPTION: {e}")
+        if not any(v is not None for v in cur_wx.values()):
+            print(f"[Weather] zone {zid} — both attempts failed")
             return zid, None
 
-    if to_fetch:
-        with ThreadPoolExecutor(max_workers=10) as ex:
-            for zid, val in ex.map(fetch_one, to_fetch):
+        aqi_val = None
+        try:
+            r3 = requests.get(
+                f"https://air-quality-api.open-meteo.com/v1/air-quality"
+                f"?latitude={lat}&longitude={lon}&current=european_aqi&timezone=auto",
+                timeout=9)
+            if r3.ok:
+                d3j = r3.json()
+                if not d3j.get("error"):
+                    aqi_val = d3j.get("current", {}).get("european_aqi")
+        except Exception:
+            pass
+
+        def avg(lst):
+            v = [x for x in (lst or []) if x is not None]
+            return round(sum(v) / len(v), 1) if v else None
+
+        def rsum(lst):
+            v = [x for x in (lst or []) if x is not None]
+            return round(sum(v), 1) if v else None
+
+        def rmax(lst):
+            v = [x for x in (lst or []) if x is not None]
+            return max(v) if v else None
+
+        def om_day(n):
+            if daily_wx:
+                mx = daily_wx.get("temperature_2m_max", [])[:n]
+                mn = daily_wx.get("temperature_2m_min", [])[:n]
+                wk = "wind_speed_10m_max" if "wind_speed_10m_max" in daily_wx else "windspeed_10m_max"
+                ck = "cloud_cover_mean" if "cloud_cover_mean" in daily_wx else "cloudcover_mean"
+                return {
+                    "temp":     avg(mx + mn),
+                    "rain":     rsum(daily_wx.get("precipitation_sum", [])[:n]),
+                    "wind":     rmax(daily_wx.get(wk, [])[:n]),
+                    "humidity": None,
+                    "cloud":    avg(daily_wx.get(ck, [])[:n]),
+                    "aqi":      None,
+                }
+            temps, winds, clouds, rains = [], [], [], []
+            for fd in forecast_days[:n]:
+                mx2, mn2 = _f(fd.get("maxtempC")), _f(fd.get("mintempC"))
+                if mx2:
+                    temps.append(mx2)
+                if mn2:
+                    temps.append(mn2)
+                for h in fd.get("hourly", []):
+                    w2 = _f(h.get("windspeedKmph"))
+                    c2 = _f(h.get("cloudcover"))
+                    p2 = _f(h.get("precipMM"))
+                    if w2:
+                        winds.append(w2)
+                    if c2:
+                        clouds.append(c2)
+                    if p2:
+                        rains.append(p2)
+            return {"temp": avg(temps), "rain": rsum(rains), "wind": rmax(winds),
+                    "humidity": None, "cloud": avg(clouds), "aqi": None}
+
+        val = {
+            "now": {**cur_wx, "aqi": aqi_val},
+            "d1":  om_day(1),
+            "d3":  om_day(3),
+            "d7":  om_day(7),
+        }
+        WEATHER_CACHE[f"wx_{zid}"] = (time.time(), val)
+        return zid, val
+
+    # Limit fresh fetches to avoid Render's 30s timeout; remaining get nearest-zone fallback
+    MAX_FETCH = 15
+    fetch_now = to_fetch[:MAX_FETCH]
+
+    if fetch_now:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            for zid, val in ex.map(fetch_one, fetch_now):
                 if val:
                     results[zid] = val
 
-    return jsonify({"ok": True, "data": results})
+    # Build coordinate index for nearest-zone interpolation
+    zone_coords = {str(z.get("id", "")): (z.get("lat", 0), z.get("lon", 0)) for z in zones}
+    loaded_ids = list(results.keys())
+    interpolated = []
+
+    if loaded_ids:
+        for z in zones:
+            zid = str(z.get("id", "")).strip()
+            if not zid or zid in results:
+                continue
+            lat0, lon0 = zone_coords.get(zid, (0, 0))
+            nearest_id = min(
+                loaded_ids,
+                key=lambda lid: math.sqrt(
+                    (zone_coords.get(lid, (0, 0))[0] - lat0) ** 2 +
+                    (zone_coords.get(lid, (0, 0))[1] - lon0) ** 2
+                )
+            )
+            results[zid] = results[nearest_id]
+            interpolated.append(zid)
+
+    cache_hits = len(zones) - len(to_fetch)
+    print(f"[Weather] zones={len(zones)} cache={cache_hits} fetched={len(fetch_now)} "
+          f"loaded={len(loaded_ids)} interpolated={len(interpolated)} returned={len(results)}")
+
+    return jsonify({
+        "ok": True,
+        "data": results,
+        "stats": {
+            "requested": len(zones),
+            "returned": len(results),
+            "cached": cache_hits,
+            "fetched": len(fetch_now),
+            "loaded": len(loaded_ids),
+            "interpolated": len(interpolated),
+        }
+    })
 
 
 # =========================
