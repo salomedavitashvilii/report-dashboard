@@ -433,11 +433,6 @@ function switchView(view) {
     viewTable.style.display = "none";
     viewReport.style.display = "block";
     renderReport();
-    if (!liveZoneMapInstance) {
-      setTimeout(renderLiveZoneMap, 80);
-    } else {
-      setTimeout(() => liveZoneMapInstance.invalidateSize(), 100);
-    }
   }
 }
 
@@ -1359,11 +1354,7 @@ function renderLiveZoneMap() {
           L.DomEvent.stopPropagation(e);
           if (liveZoneGeoJsonLayer) {
             const b = liveZoneGeoJsonLayer.getBounds();
-            if (b.isValid()) {
-              const offset = document.fullscreenElement ? 0 : 1;
-              const z = liveZoneMapInstance.getBoundsZoom(b, false, L.point(5, 5)) + offset;
-              liveZoneMapInstance.setView(b.getCenter(), z);
-            }
+            if (b.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [20, 20] });
           }
         });
         return btn;
@@ -1511,16 +1502,12 @@ function renderLiveZoneMap() {
         }
       });
 
-      const bounds = liveZoneGeoJsonLayer.getBounds();
-      if (bounds.isValid()) {
-        const z = liveZoneMapInstance.getBoundsZoom(bounds, false, L.point(5, 5)) + 1;
-        liveZoneMapInstance.setView(bounds.getCenter(), z);
-      }
-
       if (weatherActive) loadWeatherData(false);
 
       setTimeout(() => {
         liveZoneMapInstance.invalidateSize();
+        const b = liveZoneGeoJsonLayer?.getBounds();
+        if (b?.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [20, 20] });
         showMapLoading(false);
       }, 250);
     })
@@ -2117,6 +2104,12 @@ function renderTable() {
     drawBtn.dataset.i = i;
     drawBtn.textContent = "ნახაზი";
     tdBtn.appendChild(drawBtn);
+
+    const detBtn = document.createElement("button");
+    detBtn.className = "btn btn-detail";
+    detBtn.textContent = "დეტ.";
+    detBtn.addEventListener("click", () => openRowDetailModal(row));
+    tdBtn.appendChild(detBtn);
 
     if (row.CADCODE) {
       const oqmiUrl = `https://api.napr.gov.ge/lr/redi?pid=101&FRAME_NAME=REDI.APP.PAGE&FRAME=MAIN.FORM.REDI&FLD_PAPER_ID=&REGNUMBER=&CADCODE=${encodeURIComponent(String(row.CADCODE).trim())}&WEB_NUMBER=&OWNER_IDN=&PRSN_IDN=&TAG=&PERPAGE=10&DATE1=&DATE2=&REGION=&ZONE=&SECTOR=&GL_FLD_SURVEY_ID=&CREATOR=&CALL_STATUS=&SURVEY_TYPE=&STATUS=&FLAG=&finishPAPER=find#`;
@@ -2791,10 +2784,40 @@ function openModal(id) {
 
 function closeAllModals() {
   document.getElementById("modal-overlay").classList.remove("open");
-  ["modal-progress", "modal-audit", "modal-rain-impact"].forEach((id) => {
+  ["modal-progress", "modal-audit", "modal-rain-impact", "modal-row-detail"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
+}
+
+function openRowDetailModal(row) {
+  const modal = document.getElementById("modal-row-detail");
+  const body = document.getElementById("row-detail-body");
+  const tagEl = document.getElementById("row-detail-tag");
+  const overlay = document.getElementById("modal-overlay");
+  if (!modal || !body) return;
+
+  if (tagEl) tagEl.textContent = `TAG: ${row.TAG || "—"}`;
+
+  const fields = [
+    { label: "CADCODE",      value: row.CADCODE },
+    { label: "DATE_",        value: row.DATE_ },
+    { label: "ZONE",         value: row.ZONE },
+    { label: "SECTOR",       value: row.SECTOR },
+    { label: "FUNCTION",     value: row.FUNCTION_LABEL || row.FUNCTION },
+    { label: "CATEGORY",     value: row.CATEGORY_LABEL || row.CATEGORY },
+    { label: "აზომვის ტიპი", value: row.AZOMVIS_TIPI_LABEL || row.AZOMVIS_TIPI },
+  ];
+
+  body.innerHTML = fields.map(f =>
+    `<div class="rdm-field">
+       <span class="rdm-label">${escHtml(f.label)}</span>
+       <span class="rdm-value">${escHtml(String(f.value ?? "—"))}</span>
+     </div>`
+  ).join("");
+
+  modal.style.display = "block";
+  overlay.classList.add("open");
 }
 
 // =========================

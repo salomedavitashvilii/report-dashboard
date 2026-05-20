@@ -3786,13 +3786,21 @@ canvas { cursor: default; }
 }
 
 .weather-panel {
-  position: static;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 800;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 8px 28px rgba(0,0,0,0.14);
   padding: 14px 16px 12px;
-  width: 100%;
+  width: 260px;
+  backdrop-filter: blur(8px);
+}
+
+.live-map-area {
+  position: relative;
 }
 
 .wp-header {
@@ -3826,21 +3834,18 @@ canvas { cursor: default; }
   color: var(--text);
 }
 
-/* wp-content: side-by-side vars + periods on desktop */
 .wp-content {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
 .wp-vars {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 5px;
   margin-bottom: 0;
-  flex: 1;
 }
 .wp-var {
   background: var(--hover-light);
@@ -3954,10 +3959,35 @@ canvas { cursor: default; }
    RESPONSIVE OVERRIDES — comprehensive mobile/tablet polish
    ============================================================ */
 
+/* --- "დეტ." button: hidden on desktop, shown on mobile --- */
+.btn-detail { display: none; }
+
+/* --- Row detail modal fields --- */
+.rdm-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.rdm-field:last-child { border-bottom: none; }
+.rdm-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.rdm-value {
+  font-size: 0.88rem;
+  color: var(--text);
+  text-align: right;
+  word-break: break-all;
+}
+
 /* --- Tablet (≤900px) ---------------------------------------- */
 @media (max-width: 900px) {
-  /* Tables: allow horizontal scroll instead of squishing columns */
-  .table,
+  /* Report table: allow horizontal scroll (many columns) */
   .report-table {
     table-layout: auto;
     min-width: 700px;
@@ -3979,15 +4009,6 @@ canvas { cursor: default; }
   .map-toggle {
     order: 2;
     flex-wrap: wrap;
-  }
-
-  /* Weather panel: stack vars+periods vertically on tablets */
-  .wp-content {
-    flex-direction: column;
-    gap: 8px;
-  }
-  .wp-vars {
-    grid-template-columns: repeat(6, 1fr);
   }
 
   .report-toolbar {
@@ -4013,6 +4034,18 @@ canvas { cursor: default; }
 
 /* --- Mobile (≤768px) ---------------------------------------- */
 @media (max-width: 768px) {
+  /* Data table: hide detail columns, show only TAG + actions */
+  #tbl {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 0;
+  }
+  #tbl thead th:not(:first-child):not(:last-child),
+  #tbl tbody td:not(:first-child):not(:last-child) {
+    display: none;
+  }
+  .btn-detail { display: inline-flex; }
+
   /* Map height */
   .live-zone-map {
     height: 400px !important;
@@ -4026,8 +4059,15 @@ canvas { cursor: default; }
     font-size: 0.78rem;
   }
 
-  /* Weather panel below map: compact padding, 3-col vars */
+  /* Weather panel: below the map on mobile (position:static, full-width) */
+  .live-map-area {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
   .weather-panel {
+    position: static;
+    width: 100%;
     padding: 10px 12px 8px;
     border-radius: 10px;
   }
@@ -4055,7 +4095,7 @@ canvas { cursor: default; }
     font-size: 0.82rem;
   }
 
-  /* Filter actions: stack buttons on narrow screens */
+  /* Filter actions: stack buttons vertically */
   .filter-actions {
     flex-direction: column;
     align-items: stretch;
@@ -4073,12 +4113,7 @@ canvas { cursor: default; }
     gap: 8px;
     padding: 10px 12px;
   }
-
-  .report-toolbar-center {
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
+  .report-toolbar-center { flex-wrap: wrap; gap: 6px; }
   .report-toolbar-right {
     border-left: none;
     padding-left: 0;
@@ -4086,50 +4121,30 @@ canvas { cursor: default; }
     padding-top: 8px;
     flex-wrap: wrap;
   }
-
   .report-tool-btn,
-  .report-export-btn {
-    flex: 1;
-    min-width: 90px;
-    text-align: center;
-  }
+  .report-export-btn { flex: 1; min-width: 90px; text-align: center; }
 
   /* top-insights single column */
-  .top-insights-grid {
-    grid-template-columns: 1fr;
-  }
+  .top-insights-grid { grid-template-columns: 1fr; }
 
   /* zone map fewer columns */
-  .zone-map {
-    grid-template-columns: repeat(3, minmax(70px, 1fr));
-  }
+  .zone-map { grid-template-columns: repeat(3, minmax(70px, 1fr)); }
 
   /* Modals full-width */
-  .modal-box {
-    width: 96vw;
-    max-height: 90vh;
-  }
+  .modal-box { width: 96vw; max-height: 90vh; }
 }
 
 /* --- Small phones (≤480px) ---------------------------------- */
 @media (max-width: 480px) {
   /* Shorter map */
-  .live-zone-map {
-    height: 320px !important;
-  }
+  .live-zone-map { height: 320px !important; }
 
   /* Weather vars 2-col */
-  .wp-vars {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .weather-panel {
-    padding: 8px 10px 6px;
-  }
+  .wp-vars { grid-template-columns: repeat(2, 1fr); }
+  .weather-panel { padding: 8px 10px 6px; }
 
-  /* Map info panel hidden — user taps zone directly */
-  .map-info-panel {
-    display: none;
-  }
+  /* Map info panel hidden */
+  .map-info-panel { display: none; }
 
   /* Brand smaller */
   .brand { font-size: 0.88rem; }
@@ -4144,10 +4159,7 @@ canvas { cursor: default; }
   .rain-field { width: 100%; }
 
   /* Weather ctrl smaller */
-  .weather-ctrl {
-    padding: 7px 8px;
-    gap: 4px;
-  }
+  .weather-ctrl { padding: 7px 8px; gap: 4px; }
   .weather-layer-btn { height: 26px; font-size: 0.75rem; padding: 0 7px; }
 
   /* Date presets wrap */
