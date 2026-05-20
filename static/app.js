@@ -15,6 +15,7 @@ let selectedZoneForSectors = null;
 let tableData = [];
 let sortState = { key: null, asc: true };
 let activeMaps = {};
+let naxaziMapInstance = null;
 let currentView = "data";
 let showOnlyActiveZones = true;
 
@@ -1354,7 +1355,7 @@ function renderLiveZoneMap() {
           L.DomEvent.stopPropagation(e);
           if (liveZoneGeoJsonLayer) {
             const b = liveZoneGeoJsonLayer.getBounds();
-            if (b.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [20, 20] });
+            if (b.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [5, 5] });
           }
         });
         return btn;
@@ -1383,26 +1384,31 @@ function renderLiveZoneMap() {
         btn.id    = "fs-toggle-btn";
         btn.title = "სრული ეკრანი";
         btn.innerHTML = "⛶";
+        const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
         L.DomEvent.on(btn, "click", (e) => {
           L.DomEvent.stopPropagation(e);
           const container = liveZoneMapInstance.getContainer();
-          if (!document.fullscreenElement) {
-            container.requestFullscreen().catch(() => {});
+          if (!isFs()) {
+            if (container.requestFullscreen) container.requestFullscreen().catch(() => {});
+            else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
             btn.innerHTML = "✕";
             btn.title = "სრული ეკრანიდან გასვლა";
           } else {
-            document.exitFullscreen();
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
             btn.innerHTML = "⛶";
             btn.title = "სრული ეკრანი";
           }
         });
-        document.addEventListener("fullscreenchange", () => {
-          if (!document.fullscreenElement) {
+        const onFsChange = () => {
+          if (!isFs()) {
             btn.innerHTML = "⛶";
             btn.title = "სრული ეკრანი";
             setTimeout(() => liveZoneMapInstance.invalidateSize(), 100);
           }
-        });
+        };
+        document.addEventListener("fullscreenchange", onFsChange);
+        document.addEventListener("webkitfullscreenchange", onFsChange);
         return btn;
       },
     });
@@ -1507,7 +1513,7 @@ function renderLiveZoneMap() {
       setTimeout(() => {
         liveZoneMapInstance.invalidateSize();
         const b = liveZoneGeoJsonLayer?.getBounds();
-        if (b?.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [30, 30] });
+        if (b?.isValid()) liveZoneMapInstance.fitBounds(b, { padding: [5, 5] });
         showMapLoading(false);
       }, 400);
     })
@@ -2068,11 +2074,8 @@ function renderTable() {
   const start = (currentPage - 1) * PAGE_SIZE;
   const pageData = filtered.slice(start, start + PAGE_SIZE);
 
-  const colCount = 9;
   pageData.forEach((row, relIdx) => {
     const i = start + relIdx;
-    const mapId = `map-${i}`;
-    const expId = `exp-${i}`;
 
     const geomText = row.wkt_geom
       ? JSON.stringify(row.wkt_geom)
@@ -2124,30 +2127,11 @@ function renderTable() {
 
     tr.appendChild(tdBtn);
 
-    const trExp = document.createElement("tr");
-    trExp.className = "expander-row";
-    trExp.id = expId;
-    trExp.innerHTML = `<td colspan="${colCount}"><div class="mini-detail"><div id="${mapId}" class="mini-map"></div><textarea class="geom-text" readonly>${geomText}</textarea></div></td>`;
-
     drawBtn.addEventListener("click", () => {
-      const exp = document.getElementById(expId);
-      const isOpen = exp.dataset.open === "1";
-      drawBtn.classList.toggle("active", !isOpen);
-
-      if (isOpen) {
-        exp.dataset.open = "";
-        exp.style.display = "none";
-        if (activeMaps[mapId]) { activeMaps[mapId].remove(); delete activeMaps[mapId]; }
-      } else {
-        exp.dataset.open = "1";
-        exp.style.display = window.matchMedia("(max-width: 768px)").matches ? "block" : "table-row";
-        initMiniMap(i, geomText);
-        setTimeout(() => { if (activeMaps[mapId]) activeMaps[mapId].invalidateSize(); }, 200);
-      }
+      openNaxaziModal(geomText);
     });
 
     tbody.appendChild(tr);
-    tbody.appendChild(trExp);
   });
 
   renderPagination(totalFiltered, totalPages);
@@ -2786,10 +2770,33 @@ function openModal(id) {
 
 function closeAllModals() {
   document.getElementById("modal-overlay").classList.remove("open");
-  ["modal-progress", "modal-audit", "modal-rain-impact", "modal-row-detail"].forEach((id) => {
+  ["modal-progress", "modal-audit", "modal-rain-impact", "modal-row-detail", "modal-naxazi"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
+  if (naxaziMapInstance) { naxaziMapInstance.remove(); naxaziMapInstance = null; }
+}
+
+function openNaxaziModal(geomText) {
+  const modal = document.getElementById("modal-naxazi");
+  const overlay = document.getElementById("modal-overlay");
+  if (!modal) return;
+  modal.style.display = "block";
+  overlay.classList.add("open");
+  setTimeout(() => {
+    if (naxaziMapInstance) { naxaziMapInstance.remove(); naxaziMapInstance = null; }
+    naxaziMapInstance = L.map("naxazi-map", { zoomControl: true });
+    L.tileLayer(TILE_URLS.light, { maxZoom: 20 }).addTo(naxaziMapInstance);
+    try {
+      const gj = JSON.parse(geomText);
+      const layer = L.geoJSON(gj, { style: { color: "#2563eb", weight: 2, fillOpacity: 0.3 } }).addTo(naxaziMapInstance);
+      if (layer.getBounds().isValid()) naxaziMapInstance.fitBounds(layer.getBounds(), { padding: [20, 20] });
+      else naxaziMapInstance.setView([41.72, 44.78], 10);
+    } catch (e) {
+      naxaziMapInstance.setView([41.72, 44.78], 10);
+    }
+    naxaziMapInstance.invalidateSize();
+  }, 100);
 }
 
 function openRowDetailModal(row) {

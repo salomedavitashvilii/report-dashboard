@@ -4034,36 +4034,10 @@ canvas { cursor: default; }
 
 /* --- Mobile (≤768px) ---------------------------------------- */
 @media (max-width: 768px) {
-  /* Data table: convert rows to flex cards — no horizontal scroll */
-  #tbl, #tbl tbody { display: block; }
-  #tbl thead { display: none; }
-
-  #tbl tbody tr:not(.expander-row) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-  }
-  /* TAG: flexible, truncating */
-  #tbl tbody tr:not(.expander-row) td:first-child {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.88rem;
-    font-weight: 600;
-  }
-  /* middle columns: invisible */
-  #tbl tbody tr:not(.expander-row) td:not(:first-child):not(:last-child) { display: none; }
-  /* actions: don't grow */
-  #tbl tbody tr:not(.expander-row) td:last-child { flex-shrink: 0; }
-
-  /* Expander row: full-width block */
-  #tbl tbody tr.expander-row { display: block; padding: 0; }
-  #tbl tbody tr.expander-row td { display: block; }
-
+  /* Data table: hide middle columns, keep TAG + actions */
+  #tbl { table-layout: auto; }
+  #tbl thead tr th:not(:first-child):not(:last-child),
+  #tbl tbody tr td:not(:first-child):not(:last-child) { display: none; }
   /* Action buttons: stack vertically */
   .td-actions { flex-direction: column; gap: 3px; align-items: stretch; }
   .td-actions .btn, .td-actions a.btn {
@@ -4071,11 +4045,6 @@ canvas { cursor: default; }
     height: auto; line-height: 1.4; text-align: center;
   }
   .btn-detail { display: inline-flex; }
-
-  /* Expander: hide raw JSON, shorter map */
-  .geom-text { display: none; }
-  .mini-map { height: 180px; }
-  .mini-detail { padding: 8px; }
 
   /* Map height */
   .live-zone-map {
@@ -4117,10 +4086,18 @@ canvas { cursor: default; }
 
   .map-toggle {
     width: 100%;
-    justify-content: stretch;
+    flex-direction: column;
+    gap: 6px;
   }
-
-  .map-toggle button {
+  .active-zone-toggle {
+    width: 100%;
+  }
+  .map-toggle-buttons {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+  }
+  .map-toggle-buttons button {
     flex: 1;
     padding: 8px 10px;
     font-size: 0.82rem;
