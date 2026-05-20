@@ -433,6 +433,11 @@ function switchView(view) {
     viewTable.style.display = "none";
     viewReport.style.display = "block";
     renderReport();
+    if (!liveZoneMapInstance) {
+      setTimeout(renderLiveZoneMap, 80);
+    } else {
+      setTimeout(() => liveZoneMapInstance.invalidateSize(), 100);
+    }
   }
 }
 

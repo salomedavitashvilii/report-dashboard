@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-  <link rel="stylesheet" href="/static/style.css?v=32" />
+  <link rel="stylesheet" href="/static/style.css?v=33" />
 </head>
 
 <body class="theme-light">
@@ -288,11 +288,11 @@
                 <input type="checkbox" id="toggle-active-zones" checked />
                 <span>მხოლოდ აქტიური ზონები</span>
               </label>
-              <button type="button" id="btn-zone-list" class="active">
+              <button type="button" id="btn-zone-list">
                 ჩამონათვალი
               </button>
 
-              <button type="button" id="btn-live-map">
+              <button type="button" id="btn-live-map" class="active">
                 რუკა
               </button>
 
@@ -302,43 +302,12 @@
             </div>
           </div>
 
-          <div id="zone-list-view">
+          <div id="zone-list-view" style="display:none;">
             <div id="zone-map" class="zone-map"></div>
             <div id="sector-panel" class="sector-panel"></div>
           </div>
 
-          <div id="live-map-view" style="display: none;">
-
-            <!-- Weather panel -->
-            <div id="weather-panel" class="weather-panel" style="display:none;">
-              <div class="wp-header">
-                <span class="wp-title">☁ ამინდი</span>
-                <button class="wp-icon-btn" id="btn-weather-refresh" title="განახლება">↻</button>
-                <button class="wp-icon-btn" id="btn-weather-close" title="დახურვა">✕</button>
-              </div>
-              <div class="wp-vars">
-                <button class="wp-var active" data-var="temp">🌡 ტემპ.</button>
-                <button class="wp-var" data-var="rain">🌧 წვიმა</button>
-                <button class="wp-var" data-var="wind">💨 ქარი</button>
-                <button class="wp-var" data-var="humidity">💧 ტენ.</button>
-                <button class="wp-var" data-var="cloud">☁ ღრუბ.</button>
-                <button class="wp-var" data-var="aqi">🌿 ჰაერი</button>
-              </div>
-              <div class="wp-periods">
-                <button class="wp-period active" data-period="now">ახლა</button>
-                <button class="wp-period" data-period="d1">24სთ</button>
-                <button class="wp-period" data-period="d3">3 დღე</button>
-                <button class="wp-period" data-period="d7">7 დღე</button>
-              </div>
-              <div id="weather-legend-bar" class="weather-legend-bar"></div>
-              <div id="weather-status" class="weather-status" style="display:none;"></div>
-            </div>
-
-            <div id="map-loading-overlay" class="map-loading-overlay" style="display:none;">
-              <div class="map-spinner"></div>
-              <span>რუკა იტვირთება...</span>
-            </div>
-            <div id="map-info-panel" class="map-info-panel hidden"></div>
+          <div id="live-map-view">
             <div class="map-legend-dynamic">
               <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#7f0000;"></span>ძალიან მაღალი</div>
               <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#ef4444;"></span>მაღალი</div>
@@ -348,7 +317,42 @@
               <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#93c5fd;"></span>ძ. დაბალი</div>
               <div class="legend-swatch"><span class="legend-swatch-dot" style="background:#cbd5e1;"></span>მონ. არ არის</div>
             </div>
-            <div id="live-zone-map" class="live-zone-map"></div>
+
+            <div class="live-map-wrap">
+              <div id="map-loading-overlay" class="map-loading-overlay" style="display:none;">
+                <div class="map-spinner"></div>
+                <span>რუკა იტვირთება...</span>
+              </div>
+              <div id="map-info-panel" class="map-info-panel hidden"></div>
+              <div id="live-zone-map" class="live-zone-map"></div>
+            </div>
+
+            <!-- Weather panel below map -->
+            <div id="weather-panel" class="weather-panel" style="display:none;">
+              <div class="wp-header">
+                <span class="wp-title">☁ ამინდი</span>
+                <button class="wp-icon-btn" id="btn-weather-refresh" title="განახლება">↻</button>
+                <button class="wp-icon-btn" id="btn-weather-close" title="დახურვა">✕</button>
+              </div>
+              <div class="wp-content">
+                <div class="wp-vars">
+                  <button class="wp-var active" data-var="temp">🌡 ტემპ.</button>
+                  <button class="wp-var" data-var="rain">🌧 წვიმა</button>
+                  <button class="wp-var" data-var="wind">💨 ქარი</button>
+                  <button class="wp-var" data-var="humidity">💧 ტენ.</button>
+                  <button class="wp-var" data-var="cloud">☁ ღრუბ.</button>
+                  <button class="wp-var" data-var="aqi">🌿 ჰაერი</button>
+                </div>
+                <div class="wp-periods">
+                  <button class="wp-period active" data-period="now">ახლა</button>
+                  <button class="wp-period" data-period="d1">24სთ</button>
+                  <button class="wp-period" data-period="d3">3 დღე</button>
+                  <button class="wp-period" data-period="d7">7 დღე</button>
+                </div>
+              </div>
+              <div id="weather-legend-bar" class="weather-legend-bar"></div>
+              <div id="weather-status" class="weather-status" style="display:none;"></div>
+            </div>
           </div>
         </div>
         <div class="charts-grid">
@@ -469,7 +473,7 @@
       <div id="rain-impact-result"></div>
     </div>
   </div>
-  <script src="/static/app.js?v=35"></script>
+  <script src="/static/app.js?v=36"></script>
 </body>
 
 </html>
